@@ -1,0 +1,14 @@
+Incremental Groovy Gradle Plugin
+Copyright the original author or authors.
+
+This product includes software developed as part of Gradle
+(https://github.com/gradle/gradle), copyright the original author or authors,
+licensed under the Apache License, Version 2.0.
+
+The classes below io.github.jdaugherty.incrementalgroovy.internal that carry
+Gradle's license header are derived from Gradle. Each of them names the Gradle
+source file it comes from. They have been moved to another package, and changed
+to fix incremental Groovy compilation, as proposed to Gradle in
+https://github.com/gradle/gradle/pull/39622.
+
+This project is not affiliated with or endorsed by Gradle, Inc.

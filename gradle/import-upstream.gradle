@@ -1,0 +1,183 @@
+/*
+ * Copyright the original author or authors.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/**
+ * Imports the forked Gradle sources from a Gradle checkout, repackaged.
+ *
+ *     ./gradlew importUpstream -PgradleCheckout=~/gradle -PgradleRef=v9.9.2 [-PimportInto=/tmp/out]
+ *
+ * Every class listed in `forked` is read at the given git ref, moved to this project's package, and written below the
+ * output directory, this project by default. References to other forked classes are rewritten, and classes that used to
+ * be in the same package but are not forked are imported from Gradle.
+ *
+ * The task overwrites the forked files, including the changes made to them here. To move to a newer Gradle version,
+ * import both versions into scratch directories and compare them.
+ */
+
+def base = 'io.github.jdaugherty.incrementalgroovy.internal'
+
+def languageJava = 'platforms/jvm/language-java/src/main/java/'
+def languageGroovy = 'platforms/jvm/language-groovy/src/main/java/'
+def groovyWorker = 'platforms/jvm/groovy-compiler-worker/src/main/java/'
+def apiExtractor = 'platforms/core-configuration/java-api-extractor/src/main/java/'
+
+def incremental = 'org.gradle.api.internal.tasks.compile.incremental'
+def compile = 'org.gradle.api.internal.tasks.compile'
+def toolsApi = 'org.gradle.internal.tools.api'
+
+// upstream source root, upstream package, target package, target source set, class names
+def forked = [
+    [languageJava, incremental, "${base}.incremental", 'impl', [
+        'IncrementalCompilerFactory',
+        'IncrementalResultStoringCompiler',
+        'RecompilationNotNecessary',
+        'SelectiveCompiler',
+    ]],
+    [languageJava, "${incremental}.classpath", "${base}.incremental.classpath", 'impl', [
+        'DefaultClassSetAnalyzer',
+    ]],
+    [languageJava, "${incremental}.deps", "${base}.incremental.deps", 'impl', [
+        'ClassSetAnalysis',
+    ]],
+    [languageJava, "${incremental}.recomp", "${base}.incremental.recomp", 'impl', [
+        'AbstractRecompilationSpecProvider',
+        'CurrentCompilation',
+        'CurrentCompilationAccess',
+        'DefaultIncrementalCompileResult',
+        'DefaultSourceFileClassNameConverter',
+        'FileNameDerivingClassNameConverter',
+        'IncrementalCompilationResult',
+        'PreviousCompilation',
+        'PreviousCompilationAccess',
+        'PreviousCompilationData',
+        'RecompilationSpec',
+        'RecompilationSpecProvider',
+        'SourceFileChangeProcessor',
+        'SourceFileClassNameConverter',
+    ]],
+    [languageJava, "${incremental}.transaction", "${base}.incremental.transaction", 'impl', [
+        'CompileTransaction',
+    ]],
+    [languageGroovy, "${incremental}.recomp", "${base}.incremental.recomp", 'impl', [
+        'GroovyRecompilationSpecProvider',
+    ]],
+    [languageGroovy, "${compile}.daemon", "${base}.daemon", 'impl', [
+        'DaemonGroovyCompiler',
+    ]],
+    [apiExtractor, toolsApi, "${base}.abi", 'impl', [
+        'ApiClassExtractor',
+    ]],
+    [apiExtractor, "${toolsApi}.impl", "${base}.abi.impl", 'impl', [
+        'ApiMemberSelector',
+    ]],
+    [groovyWorker, compile, "${base}.worker", 'worker', [
+        'ApiGroovyCompiler',
+        'CompileClasspathGroovyClassLoader',
+        'DaemonSideCompiler',
+        'GroovyCompileTransformingClassLoader',
+        'StashedClassesClassLoader',
+        'StashedClassesGroovyClassLoader',
+    ]],
+].collect { [root: it[0], upstreamPackage: it[1], targetPackage: it[2], sourceSet: it[3], names: it[4]] }
+
+tasks.register('importUpstream') {
+    group = 'upstream'
+    description = 'Imports the forked Gradle sources from a Gradle checkout, repackaged.'
+
+    def checkoutPath = providers.gradleProperty('gradleCheckout')
+    def gitRef = providers.gradleProperty('gradleRef')
+    def outputPath = providers.gradleProperty('importInto')
+    def projectDirectory = layout.projectDirectory.asFile
+    def userHome = System.getProperty('user.home')
+
+    doLast {
+        if (!checkoutPath.present || !gitRef.present) {
+            throw new GradleException('Usage: ./gradlew importUpstream -PgradleCheckout=<gradle checkout> -PgradleRef=<git ref> [-PimportInto=<directory>]')
+        }
+        File checkout = new File(checkoutPath.get().replaceFirst('^~', userHome))
+        String ref = gitRef.get()
+        File output = outputPath.present ? new File(outputPath.get().replaceFirst('^~', userHome)).absoluteFile : projectDirectory
+
+        def git = { List<String> arguments ->
+            Process process = new ProcessBuilder(['git'] + arguments).directory(checkout).redirectError(ProcessBuilder.Redirect.DISCARD).start()
+            String out = process.inputStream.getText('UTF-8')
+            return process.waitFor() == 0 ? out : null
+        }
+
+        Map<String, String> renames = [:]
+        forked.each { set ->
+            set.names.each { name -> renames["${set.upstreamPackage}.${name}".toString()] = "${set.targetPackage}.${name}".toString() }
+        }
+
+        // the classes of the upstream packages, to import those left behind
+        Map<String, Set<String>> classesOf = forked.collectEntries { [(it.upstreamPackage.toString()): new TreeSet<String>()] }
+        String marker = '/src/main/java/'
+        String tree = git(['ls-tree', '-r', '--name-only', ref, '--', 'platforms', 'subprojects'])
+        if (tree == null) {
+            throw new GradleException("Cannot list ${ref} in ${checkout}")
+        }
+        tree.eachLine { String path ->
+            int at = path.indexOf(marker)
+            if (at >= 0 && path.endsWith('.java')) {
+                String className = path.substring(at + marker.length(), path.length() - '.java'.length()).replace('/', '.')
+                int lastDot = className.lastIndexOf('.')
+                if (lastDot > 0) {
+                    classesOf[className.substring(0, lastDot)]?.add(className.substring(lastDot + 1))
+                }
+            }
+        }
+
+        def pattern = java.util.regex.Pattern.compile('(?:' + renames.keySet().sort { -it.length() }.collect { java.util.regex.Pattern.quote(it) }.join('|') + ')(?![A-Za-z0-9_])')
+        int written = 0
+        forked.each { set ->
+            set.names.each { String name ->
+                String path = "${set.root}${set.upstreamPackage.replace('.', '/')}/${name}.java"
+                String source = git(['show', "${ref}:${path}".toString()])
+                if (source == null) {
+                    logger.lifecycle("not in ${ref}: ${path}")
+                    return
+                }
+                source = pattern.matcher(source).replaceAll { java.util.regex.Matcher.quoteReplacement(renames[it.group()]) }
+                List<String> leftBehind = classesOf[set.upstreamPackage.toString()].findAll { String other ->
+                    !renames.containsKey("${set.upstreamPackage}.${other}".toString()) &&
+                        source =~ /\b${java.util.regex.Pattern.quote(other)}\b/ &&
+                        !(source =~ /(?m)^import [\w.]+\.${java.util.regex.Pattern.quote(other)};/)
+                }.toList()
+                String declaration = "package ${set.upstreamPackage};\n"
+                if (!source.contains(declaration)) {
+                    throw new GradleException("no package declaration in ${path}")
+                }
+                String replacement = """/*
+ * This file is derived from Gradle (https://github.com/gradle/gradle), from
+ * ${path}
+ * It has been moved to another package and modified, see the NOTICE file.
+ */
+package ${set.targetPackage};
+"""
+                if (leftBehind) {
+                    replacement += '\n' + leftBehind.collect { "import ${set.upstreamPackage}.${it};\n" }.join()
+                }
+                int at = source.indexOf(declaration)
+                source = source.substring(0, at) + replacement + source.substring(at + declaration.length())
+                File destination = new File(output, "src/${set.sourceSet}/java/${set.targetPackage.replace('.', '/')}/${name}.java")
+                destination.parentFile.mkdirs()
+                destination.setText(source, 'UTF-8')
+                written++
+            }
+        }
+        logger.lifecycle("imported ${written} files from ${ref}")
+    }
+}
