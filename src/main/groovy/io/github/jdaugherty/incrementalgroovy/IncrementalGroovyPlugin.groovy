@@ -93,6 +93,7 @@ class IncrementalGroovyPlugin implements Plugin<Project> {
             task.sourceCompatibility.set(project.provider { configuredBy.sourceCompatibility })
             task.targetCompatibility.set(project.provider { configuredBy.targetCompatibility })
             task.javaLauncher.set(configuredBy.javaLauncher)
+            task.timeout.set(project.provider { configuredBy.timeout.getOrNull() })
             task.previousCompilationData.set(project.layout.buildDirectory.file("tmp/${compileTaskName}/previous-compilation-data.bin"))
             task.outputs.doNotCacheIf('Forking compiler via ForkOptions.executable') {
                 task.options.fork && task.options.forkOptions.executable != null

@@ -364,9 +364,13 @@ class IncrementalGroovyPluginFunctionalTest extends Specification {
         file('impl/build.gradle') << """
             tasks.withType(GroovyCompile).configureEach {
                 groovyOptions.listFiles = true
+                timeout = java.time.Duration.ofMinutes(7)
             }
             compileGroovy {
                 destinationDirectory = layout.buildDirectory.dir('custom-classes')
+            }
+            tasks.named('compileIncrementalGroovy') {
+                doLast { println "timeout: \${timeout.get().toMinutes()} minutes" }
             }
         """
 
@@ -378,6 +382,7 @@ class IncrementalGroovyPluginFunctionalTest extends Specification {
         result.task(':impl:compileIncrementalGroovy').outcome.name() == 'SUCCESS'
         file('impl/build/custom-classes/A.class').file
         result.output.contains('Source files to be compiled:')
+        result.output.contains('timeout: 7 minutes')
 
         where:
         gradleVersion << GRADLE_VERSIONS

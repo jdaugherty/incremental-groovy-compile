@@ -97,6 +97,8 @@ Two things to know:
 
 - The options are taken from `compileGroovy` as they are when the build is configured. A change made to them
   later, while tasks run, is not seen.
+- The timeout of `compileGroovy` is taken over too. Actions added to it with `doFirst` or `doLast` are not: it
+  does not run. Add them to the `IncrementalGroovyCompile` tasks.
 - A `GroovyCompile` task that does not belong to a source set is left to Gradle.
 
 ## How it is made
