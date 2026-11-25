@@ -21,7 +21,6 @@ plugins {
 }
 
 group = 'io.github.jdaugherty'
-version = '0.1.0-SNAPSHOT'
 
 repositories {
     mavenCentral()
@@ -90,22 +89,6 @@ gradlePlugin {
     }
 }
 
-publishing {
-    publications.withType(MavenPublication).configureEach {
-        pom {
-            name = 'Incremental Groovy'
-            description = 'Gradle plugin that compiles Groovy incrementally'
-            url = 'https://github.com/jdaugherty/incremental-groovy-compile'
-            licenses {
-                license {
-                    name = 'The Apache License, Version 2.0'
-                    url = 'https://www.apache.org/licenses/LICENSE-2.0.txt'
-                }
-            }
-        }
-    }
-}
-
 tasks.named('test', Test) {
     useJUnitPlatform()
     // The Gradle versions the functional tests run the plugin on
@@ -129,3 +112,4 @@ tasks.named('rat') {
 }
 
 apply from: 'gradle/import-upstream.gradle'
+apply from: 'gradle/publish-central.gradle'

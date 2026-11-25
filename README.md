@@ -36,21 +36,24 @@ With the plugin:
 
 ## Usage
 
-The plugin is not published yet. Until it is, build it from source and include the build:
+Releases are published to Maven Central, where Gradle does not look for plugins unless it is told to:
 
 ```groovy
 // settings.gradle
 pluginManagement {
-    includeBuild('../incremental-groovy-compile')
+    repositories {
+        mavenCentral()
+        gradlePluginPortal()
+    }
 }
 ```
 
-Apply it to every project that compiles Groovy:
+Apply the plugin to every project that compiles Groovy:
 
 ```groovy
 plugins {
     id 'groovy'
-    id 'io.github.jdaugherty.incremental-groovy'
+    id 'io.github.jdaugherty.incremental-groovy' version '<version>'
 }
 
 tasks.withType(GroovyCompile).configureEach {
@@ -136,6 +139,16 @@ diff -ru /tmp/old /tmp/new
 
 Apply the differences, raise the supported versions in `IncrementalGroovyPlugin` and in `build.gradle`, and run
 the tests.
+
+### Releasing
+
+Pushing a tag `v<version>` runs the release workflow, which builds that version, signs it and uploads it to the
+[Central Portal](https://central.sonatype.com/publishing/deployments). The upload waits there to be released by
+hand. A release cannot be changed or removed.
+
+The workflow needs the repository secrets `MAVEN_CENTRAL_USERNAME` and `MAVEN_CENTRAL_PASSWORD`, the user token
+of the portal account, and `SIGNING_KEY` and `SIGNING_PASSWORD`, the ASCII-armored PGP private key and its
+passphrase. The public key has to be on a key server that Maven Central reads.
 
 ## License
 

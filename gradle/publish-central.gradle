@@ -1,0 +1,179 @@
+/*
+ * Copyright the original author or authors.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/**
+ * Publishing to Maven Central, through the Publisher API of the Central Portal.
+ *
+ *     ./gradlew publishToMavenCentral -Pversion=0.1.0
+ *
+ * builds the artifacts with their signatures and checksums into build/central-staging, zips them and uploads the bundle.
+ * The upload is left for a person to release or drop at https://central.sonatype.com/publishing/deployments unless
+ * -PcentralPublishingType=AUTOMATIC is given. A release cannot be changed or removed.
+ *
+ * It needs the token of a Central Portal account and a PGP key, as Gradle properties or as the environment variables
+ * ORG_GRADLE_PROJECT_<name>:
+ *
+ *     mavenCentralUsername, mavenCentralPassword   the user token generated in the portal
+ *     signingKey, signingPassword                  the ASCII-armored private key and its passphrase
+ */
+
+apply plugin: 'signing'
+
+java {
+    withSourcesJar()
+    withJavadocJar()
+}
+
+tasks.named('sourcesJar', Jar) {
+    from sourceSets.impl.allSource
+    from sourceSets.worker.allSource
+    from('LICENSE') { into 'META-INF' }
+    from('NOTICE') { into 'META-INF' }
+}
+
+// The API of the plugin is Groovy
+tasks.named('javadocJar', Jar) {
+    from tasks.named('groovydoc')
+    from('LICENSE') { into 'META-INF' }
+    from('NOTICE') { into 'META-INF' }
+}
+
+def stagingDirectory = layout.buildDirectory.dir('central-staging')
+
+publishing {
+    repositories {
+        maven {
+            name = 'centralStaging'
+            url = stagingDirectory
+        }
+    }
+    publications.withType(MavenPublication).configureEach {
+        pom {
+            name = 'Incremental Groovy Compile'
+            description = 'Gradle plugin that compiles Groovy incrementally'
+            url = 'https://github.com/jdaugherty/incremental-groovy-compile'
+            licenses {
+                license {
+                    name = 'The Apache License, Version 2.0'
+                    url = 'https://www.apache.org/licenses/LICENSE-2.0.txt'
+                }
+            }
+            developers {
+                developer {
+                    id = 'jdaugherty'
+                    name = 'James Daugherty'
+                    url = 'https://github.com/jdaugherty'
+                }
+            }
+            scm {
+                url = 'https://github.com/jdaugherty/incremental-groovy-compile'
+                connection = 'scm:git:https://github.com/jdaugherty/incremental-groovy-compile.git'
+                developerConnection = 'scm:git:ssh://git@github.com/jdaugherty/incremental-groovy-compile.git'
+            }
+        }
+    }
+}
+
+def signingKey = providers.gradleProperty('signingKey')
+def signingPassword = providers.gradleProperty('signingPassword')
+
+signing {
+    required = { gradle.taskGraph.hasTask(':publishToMavenCentral') }
+    if (signingKey.present) {
+        useInMemoryPgpKeys(signingKey.get(), signingPassword.getOrElse(''))
+    }
+    sign publishing.publications
+}
+
+tasks.withType(Sign).configureEach {
+    onlyIf('a signing key is given, or the artifacts go to Maven Central') {
+        signingKey.present || gradle.taskGraph.hasTask(':publishToMavenCentral')
+    }
+}
+
+// Gradle wants to be told that every publication is signed before any is published
+tasks.withType(AbstractPublishToMaven).configureEach {
+    mustRunAfter(tasks.withType(Sign))
+}
+
+def cleanCentralStaging = tasks.register('cleanCentralStaging', Delete) {
+    delete stagingDirectory
+}
+
+tasks.named('publishAllPublicationsToCentralStagingRepository') {
+    dependsOn cleanCentralStaging
+}
+tasks.withType(PublishToMavenRepository).configureEach {
+    mustRunAfter(cleanCentralStaging)
+}
+
+def centralBundle = tasks.register('centralBundle', Zip) {
+    group = 'publishing'
+    description = 'Zips the artifacts for Maven Central with their signatures and checksums.'
+    dependsOn 'publishAllPublicationsToCentralStagingRepository'
+    from stagingDirectory
+    // the portal maintains these itself
+    exclude '**/maven-metadata.xml*'
+    archiveFileName = providers.provider { "${project.name}-${project.version}-central-bundle.zip".toString() }
+    destinationDirectory = layout.buildDirectory.dir('central-bundle')
+}
+
+tasks.register('publishToMavenCentral') {
+    group = 'publishing'
+    description = 'Uploads the bundle of artifacts to the Central Portal.'
+    dependsOn centralBundle
+
+    def bundle = centralBundle.flatMap { it.archiveFile }
+    def username = providers.gradleProperty('mavenCentralUsername')
+    def password = providers.gradleProperty('mavenCentralPassword')
+    def publishingType = providers.gradleProperty('centralPublishingType').orElse('USER_MANAGED')
+    def deploymentName = providers.provider { "${project.group}:${project.name}:${project.version}".toString() }
+    def projectVersion = providers.provider { project.version.toString() }
+
+    doLast {
+        if (projectVersion.get().endsWith('-SNAPSHOT')) {
+            throw new GradleException("Maven Central takes releases only, and the version is ${projectVersion.get()}. Give a release version with -Pversion=.")
+        }
+        if (!username.present || !password.present) {
+            throw new GradleException('The token of the Central Portal is missing: set mavenCentralUsername and mavenCentralPassword.')
+        }
+        File file = bundle.get().asFile
+        String boundary = "----gradle-${UUID.randomUUID()}"
+        byte[] head = ("--${boundary}\r\n" +
+            "Content-Disposition: form-data; name=\"bundle\"; filename=\"${file.name}\"\r\n" +
+            "Content-Type: application/octet-stream\r\n\r\n").getBytes('UTF-8')
+        byte[] tail = "\r\n--${boundary}--\r\n".getBytes('UTF-8')
+        String query = "name=${URLEncoder.encode(deploymentName.get(), 'UTF-8')}&publishingType=${publishingType.get()}"
+        String token = "${username.get()}:${password.get()}".getBytes('UTF-8').encodeBase64().toString()
+
+        def request = java.net.http.HttpRequest.newBuilder(URI.create("https://central.sonatype.com/api/v1/publisher/upload?${query}"))
+            .header('Authorization', "Bearer ${token}")
+            .header('Content-Type', "multipart/form-data; boundary=${boundary}")
+            .POST(java.net.http.HttpRequest.BodyPublishers.concat(
+                java.net.http.HttpRequest.BodyPublishers.ofByteArray(head),
+                java.net.http.HttpRequest.BodyPublishers.ofFile(file.toPath()),
+                java.net.http.HttpRequest.BodyPublishers.ofByteArray(tail)))
+            .build()
+        def response = java.net.http.HttpClient.newHttpClient().send(request, java.net.http.HttpResponse.BodyHandlers.ofString())
+        if (response.statusCode() != 201) {
+            throw new GradleException("The Central Portal refused the upload: HTTP ${response.statusCode()} ${response.body()}")
+        }
+        logger.lifecycle("Uploaded ${file.name} to the Central Portal as deployment ${response.body().trim()}.")
+        if (publishingType.get() == 'USER_MANAGED') {
+            logger.lifecycle('Release or drop it at https://central.sonatype.com/publishing/deployments once it is validated.')
+        }
+    }
+}
