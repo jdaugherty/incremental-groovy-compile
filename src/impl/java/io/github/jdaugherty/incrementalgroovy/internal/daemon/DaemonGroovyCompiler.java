@@ -27,6 +27,7 @@ import org.gradle.api.internal.tasks.compile.daemon.CompilerWorkerExecutor;
 import org.gradle.api.internal.tasks.compile.daemon.GroovyCompilerParameters;
 
 import com.google.common.collect.Iterables;
+import io.github.jdaugherty.incrementalgroovy.internal.StashedClassFiles;
 import org.gradle.api.internal.ClassPathRegistry;
 import org.gradle.api.internal.tasks.compile.ApiCompilerResult;
 import org.gradle.api.internal.tasks.compile.BaseForkOptionsConverter;
@@ -55,6 +56,10 @@ import org.gradle.workers.internal.HierarchicalClassLoaderStructure;
 import org.gradle.workers.internal.KeepAliveMode;
 
 import java.io.File;
+import java.net.URL;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
@@ -68,7 +73,13 @@ public class DaemonGroovyCompiler extends AbstractDaemonCompiler<GroovyJavaJoint
     private final File daemonWorkingDir;
     private final JvmVersionDetector jvmVersionDetector;
     private final ProblemsInternal problems;
+    private final StashedClassFiles stashedClassFiles;
+    private final URL workerClasses;
 
+    /**
+     * @param stashedClassFiles the stashed class files of the compilation, handed to the compiler in the daemon
+     * @param workerClasses where the classes of this project that run in the daemon are
+     */
     public DaemonGroovyCompiler(
         File daemonWorkingDir,
         ClassPathRegistry classPathRegistry,
@@ -76,7 +87,9 @@ public class DaemonGroovyCompiler extends AbstractDaemonCompiler<GroovyJavaJoint
         ClassLoaderRegistry classLoaderRegistry,
         JavaForkOptionsFactory forkOptionsFactory,
         JvmVersionDetector jvmVersionDetector,
-        ProblemsInternal problems
+        ProblemsInternal problems,
+        StashedClassFiles stashedClassFiles,
+        URL workerClasses
     ) {
         super(compilerWorkerExecutor);
         this.classPathRegistry = classPathRegistry;
@@ -85,11 +98,13 @@ public class DaemonGroovyCompiler extends AbstractDaemonCompiler<GroovyJavaJoint
         this.daemonWorkingDir = daemonWorkingDir;
         this.jvmVersionDetector = jvmVersionDetector;
         this.problems = problems;
+        this.stashedClassFiles = stashedClassFiles;
+        this.workerClasses = workerClasses;
     }
 
     @Override
     protected CompilerParameters getCompilerParameters(GroovyJavaJointCompileSpec spec) {
-        return new GroovyCompilerParameters(DaemonSideCompiler.class.getName(), new Object[]{classPathRegistry.getClassPath("JAVA-COMPILER-PLUGIN").getAsFiles()}, spec);
+        return new GroovyCompilerParameters(DaemonSideCompiler.class.getName(), new Object[]{classPathRegistry.getClassPath("JAVA-COMPILER-PLUGIN").getAsFiles(), new HashMap<>(stashedClassFiles.get())}, spec);
     }
 
     @Override
@@ -138,7 +153,10 @@ public class DaemonGroovyCompiler extends AbstractDaemonCompiler<GroovyJavaJoint
             }
         }
 
-        VisitableURLClassLoader.Spec compilerClasspath = new VisitableURLClassLoader.Spec("compiler-loader", languageGroovyClasspath.getAsURLs());
+        // The compiler of this project is loaded next to the classes of Gradle's compiler that it uses
+        List<URL> compilerUrls = new ArrayList<>(languageGroovyClasspath.getAsURLs());
+        compilerUrls.add(workerClasses);
+        VisitableURLClassLoader.Spec compilerClasspath = new VisitableURLClassLoader.Spec("compiler-loader", compilerUrls);
         HierarchicalClassLoaderStructure classLoaderStructure =
             new HierarchicalClassLoaderStructure(classLoaderRegistry.getGradleWorkerExtensionSpec())
                 .withChild(getMinimalGradleFilter())

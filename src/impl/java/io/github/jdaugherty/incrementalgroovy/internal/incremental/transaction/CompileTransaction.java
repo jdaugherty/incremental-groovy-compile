@@ -23,6 +23,7 @@ package io.github.jdaugherty.incrementalgroovy.internal.incremental.transaction;
 
 import com.google.common.base.MoreObjects;
 import com.google.common.collect.ImmutableSet;
+import io.github.jdaugherty.incrementalgroovy.internal.StashedClassFiles;
 import org.gradle.api.internal.file.FileOperations;
 import org.gradle.api.internal.tasks.compile.ApiCompilerResult;
 import org.gradle.api.internal.tasks.compile.CompilationFailedException;
@@ -46,6 +47,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.EnumMap;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -66,6 +68,7 @@ import static org.gradle.api.internal.tasks.compile.incremental.compilerapi.deps
 public class CompileTransaction {
 
     private static final Logger LOG = LoggerFactory.getLogger(CompileTransaction.class);
+    private static final String CLASS_FILE_EXTENSION = ".class";
 
     private final Deleter deleter;
     private final FileOperations fileOperations;
@@ -75,13 +78,21 @@ public class CompileTransaction {
     private final File stashDirectory;
     private final File tempDir;
     private final File backupDirectory;
+    private final Set<String> classesToLoadFromStash;
+    private final StashedClassFiles stashedClassFiles;
 
+    /**
+     * @param classesToLoadFromStash the classes whose stashed class files are handed to the compiler
+     * @param stashedClassFiles receives those class files once they are stashed
+     */
     public CompileTransaction(
         JavaCompileSpec spec,
         PatternSet classesToDelete,
         Map<GeneratedResource.Location, PatternSet> resourcesToDelete,
         FileOperations fileOperations,
-        Deleter deleter
+        Deleter deleter,
+        Set<String> classesToLoadFromStash,
+        StashedClassFiles stashedClassFiles
     ) {
         this.spec = spec;
         this.tempDir = new File(spec.getTempDir(), "compileTransaction");
@@ -91,6 +102,8 @@ public class CompileTransaction {
         this.resourcesToDelete = resourcesToDelete;
         this.fileOperations = fileOperations;
         this.deleter = deleter;
+        this.classesToLoadFromStash = classesToLoadFromStash;
+        this.stashedClassFiles = stashedClassFiles;
     }
 
     /**
@@ -107,6 +120,9 @@ public class CompileTransaction {
         ensureEmptyDirectoriesBeforeExecution();
         List<StashedFile> stashedFiles = stashFilesThatShouldBeDeleted();
         try {
+            if (!classesToLoadFromStash.isEmpty()) {
+                stashedClassFiles.set(stashedClassFilesByClassName(stashedFiles));
+            }
             if (supportsIncrementalCompilationAfterFailure()) {
                 spec.setClassBackupDir(backupDirectory);
             }
@@ -164,6 +180,37 @@ public class CompileTransaction {
             stashedFiles.add(new StashedFile(fileToDelete, stashedFile));
         }
         return stashedFiles;
+    }
+
+    /**
+     * The stashed class files of the compile output that hold a class to load from the stash, keyed by the name of the
+     * class, so that a compiler can still load the class while its class file is out of the destination directory.
+     */
+    private Map<String, File> stashedClassFilesByClassName(List<StashedFile> stashedFiles) {
+        Map<String, File> classFiles = new HashMap<>();
+        if (spec.getDestinationDir() == null) {
+            return classFiles;
+        }
+        Path destinationDir = spec.getDestinationDir().toPath();
+        for (StashedFile stashedFile : stashedFiles) {
+            Path sourceFile = stashedFile.sourceFile.toPath();
+            String fileName = sourceFile.getFileName().toString();
+            if (fileName.endsWith(CLASS_FILE_EXTENSION) && sourceFile.startsWith(destinationDir)) {
+                Path relativePath = destinationDir.relativize(sourceFile);
+                StringBuilder className = new StringBuilder();
+                for (Path element : relativePath) {
+                    if (className.length() > 0) {
+                        className.append('.');
+                    }
+                    className.append(element);
+                }
+                className.setLength(className.length() - CLASS_FILE_EXTENSION.length());
+                if (classesToLoadFromStash.contains(className.toString())) {
+                    classFiles.put(className.toString(), stashedFile.stashFile);
+                }
+            }
+        }
+        return classFiles;
     }
 
     @SuppressWarnings("CheckReturnValue") //TODO: evaluate errorprone suppression (https://github.com/gradle/gradle/issues/35864)

@@ -34,15 +34,21 @@ import org.gradle.language.base.internal.compile.Compiler;
 import javax.inject.Inject;
 import java.io.File;
 import java.util.List;
+import java.util.Map;
 
 public class DaemonSideCompiler implements org.gradle.language.base.internal.compile.Compiler<GroovyJavaJointCompileSpec> {
 
     private final ObjectFactory objectFactory;
     private final List<File> javaCompilerPlugins;
     private final ProblemsInternal problemsService;
+    private final Map<String, File> stashedClassFiles;
 
+    /**
+     * @param stashedClassFiles the class files of the classes being recompiled that the compiler may have to load, by class name
+     */
     @Inject
-    public DaemonSideCompiler(ObjectFactory objectFactory, List<File> javaCompilerPlugins, ProblemsInternal problemsService) {
+    public DaemonSideCompiler(ObjectFactory objectFactory, List<File> javaCompilerPlugins, Map<String, File> stashedClassFiles, ProblemsInternal problemsService) {
+        this.stashedClassFiles = stashedClassFiles;
         this.objectFactory = objectFactory;
         this.javaCompilerPlugins = javaCompilerPlugins;
         this.problemsService = problemsService;
@@ -51,7 +57,7 @@ public class DaemonSideCompiler implements org.gradle.language.base.internal.com
     @Override
     public WorkResult execute(GroovyJavaJointCompileSpec spec) {
         org.gradle.language.base.internal.compile.Compiler<JavaCompileSpec> javaCompiler = new JdkJavaCompiler(new JavaHomeBasedJavaCompilerFactory(javaCompilerPlugins), problemsService);
-        Compiler<GroovyJavaJointCompileSpec> groovyCompiler = new ApiGroovyCompiler(javaCompiler, objectFactory);
+        Compiler<GroovyJavaJointCompileSpec> groovyCompiler = new ApiGroovyCompiler(javaCompiler, objectFactory, stashedClassFiles);
         return groovyCompiler.execute(spec);
     }
 

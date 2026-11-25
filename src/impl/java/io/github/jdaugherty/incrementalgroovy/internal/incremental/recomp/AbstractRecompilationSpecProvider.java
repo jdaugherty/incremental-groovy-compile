@@ -26,6 +26,7 @@ import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import org.gradle.api.file.FileTree;
 import org.gradle.api.file.FileType;
+import io.github.jdaugherty.incrementalgroovy.internal.StashedClassFiles;
 import org.gradle.api.internal.file.FileOperations;
 import org.gradle.api.internal.tasks.compile.JavaCompileSpec;
 import org.gradle.api.internal.tasks.compile.incremental.compilerapi.deps.DependentsSet;
@@ -57,14 +58,17 @@ abstract class AbstractRecompilationSpecProvider implements RecompilationSpecPro
     private final FileTree sourceTree;
     private final Iterable<FileChange> sourceChanges;
     private final boolean incremental;
+    private final StashedClassFiles stashedClassFiles;
 
     public AbstractRecompilationSpecProvider(
         Deleter deleter,
         FileOperations fileOperations,
         FileTree sourceTree,
         Iterable<FileChange> sourceChanges,
-        boolean incremental
+        boolean incremental,
+        StashedClassFiles stashedClassFiles
     ) {
+        this.stashedClassFiles = stashedClassFiles;
         this.deleter = deleter;
         this.fileOperations = fileOperations;
         this.sourceTree = sourceTree;
@@ -81,12 +85,15 @@ abstract class AbstractRecompilationSpecProvider implements RecompilationSpecPro
 
         SourceFileChangeProcessor sourceFileChangeProcessor = new SourceFileChangeProcessor(previous);
         processSourceChanges(current, sourceFileChangeProcessor, recompilationSpec, sourceFileClassNameConverter);
-        processCompilerSpecificDependencies(spec, recompilationSpec, sourceFileChangeProcessor, sourceFileClassNameConverter);
+        processCompilerSpecificDependencies(recompilationSpec, sourceFileChangeProcessor, sourceFileClassNameConverter);
         collectAllSourcePathsAndIndependentClasses(sourceFileChangeProcessor, recompilationSpec, sourceFileClassNameConverter);
 
         Set<String> typesToReprocess = previous.getTypesToReprocess(recompilationSpec.getClassesToCompile());
         processTypesToReprocess(typesToReprocess, recompilationSpec, sourceFileClassNameConverter);
         addModuleInfoToCompile(recompilationSpec, sourceFileClassNameConverter);
+        if (needsStashedClassFiles() && !recompilationSpec.isFullRebuildNeeded()) {
+            recompilationSpec.setClassesToLoadFromStash(previous.findClassesReferencedFromOutside(recompilationSpec.getClassesToCompile()));
+        }
 
         return recompilationSpec;
     }
@@ -135,13 +142,20 @@ abstract class AbstractRecompilationSpecProvider implements RecompilationSpecPro
     }
 
     protected abstract void processCompilerSpecificDependencies(
-        JavaCompileSpec spec,
         RecompilationSpec recompilationSpec,
         SourceFileChangeProcessor sourceFileChangeProcessor,
         SourceFileClassNameConverter sourceFileClassNameConverter
     );
 
     protected abstract boolean isIncrementalOnResourceChanges(CurrentCompilation currentCompilation);
+
+    /**
+     * Whether the compiler loads classes of the previous output, and so needs the stashed class files of the classes being
+     * recompiled that those refer to, see {@link StashedClassFiles}.
+     */
+    protected boolean needsStashedClassFiles() {
+        return false;
+    }
 
     /**
      * This method collects all source paths that will be passed to a compiler. While collecting paths it additionally also
@@ -232,7 +246,7 @@ abstract class AbstractRecompilationSpecProvider implements RecompilationSpecPro
         if (!recompilationSpec.isBuildNeeded()) {
             spec.setSourceFiles(ImmutableSet.of());
             spec.setClassesToProcess(Collections.emptySet());
-            return new CompileTransaction(spec, fileOperations.patternSet(), ImmutableMap.of(), fileOperations, deleter);
+            return new CompileTransaction(spec, fileOperations.patternSet(), ImmutableMap.of(), fileOperations, deleter, recompilationSpec.getClassesToLoadFromStash(), stashedClassFiles);
         }
 
         PatternSet classesToDelete = fileOperations.patternSet();
@@ -244,7 +258,7 @@ abstract class AbstractRecompilationSpecProvider implements RecompilationSpecPro
         addClassesToProcess(spec, recompilationSpec);
         spec.setClassesToCompile(recompilationSpec.getClassesToCompile());
         Map<GeneratedResource.Location, PatternSet> resourcesToDelete = prepareResourcePatterns(recompilationSpec.getResourcesToGenerate(), fileOperations);
-        return new CompileTransaction(spec, classesToDelete, resourcesToDelete, fileOperations, deleter);
+        return new CompileTransaction(spec, classesToDelete, resourcesToDelete, fileOperations, deleter, recompilationSpec.getClassesToLoadFromStash(), stashedClassFiles);
     }
 
     private static Iterable<File> narrowDownSourcesToCompile(FileTree sourceTree, PatternSet sourceToCompile) {
