@@ -83,7 +83,7 @@ gradlePlugin {
     plugins {
         incrementalGroovyCompile {
             id = 'io.github.jdaugherty.incremental-groovy'
-            implementationClass = 'io.github.jdaugherty.incrementalgroovy.IncrementalGroovyCompilePlugin'
+            implementationClass = 'io.github.jdaugherty.incrementalgroovy.IncrementalGroovyPlugin'
             displayName = 'Incremental Groovy'
             description = 'Compiles Groovy incrementally, without failing on classes of the previous compilation and without recompiling more than it has to'
         }
