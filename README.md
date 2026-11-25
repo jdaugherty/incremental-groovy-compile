@@ -1,4 +1,4 @@
-# Incremental Groovy Gradle Plugin
+# Incremental Groovy Compile
 
 A Gradle plugin that compiles Groovy, and Java together with it, incrementally. Its compiler is made from
 Gradle's own, with the changes proposed to Gradle in
@@ -41,7 +41,7 @@ The plugin is not published yet. Until it is, build it from source and include t
 ```groovy
 // settings.gradle
 pluginManagement {
-    includeBuild('../incremental-groovy-gradle-plugin')
+    includeBuild('../incremental-groovy-compile')
 }
 ```
 

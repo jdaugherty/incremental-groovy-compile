@@ -95,7 +95,7 @@ publishing {
         pom {
             name = 'Incremental Groovy'
             description = 'Gradle plugin that compiles Groovy incrementally'
-            url = 'https://github.com/jdaugherty/incremental-groovy-gradle-plugin'
+            url = 'https://github.com/jdaugherty/incremental-groovy-compile'
             licenses {
                 license {
                     name = 'The Apache License, Version 2.0'
