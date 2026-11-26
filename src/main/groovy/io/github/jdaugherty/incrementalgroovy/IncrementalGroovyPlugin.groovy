@@ -18,6 +18,7 @@ package io.github.jdaugherty.incrementalgroovy
 import groovy.transform.CompileStatic
 import org.gradle.api.Plugin
 import org.gradle.api.Project
+import org.gradle.api.Task
 import org.gradle.api.logging.Logger
 import org.gradle.api.logging.Logging
 import org.gradle.api.plugins.GroovyBasePlugin
@@ -81,6 +82,9 @@ class IncrementalGroovyPlugin implements Plugin<Project> {
             task.groovyClasspath.from({ configuredBy.groovyClasspath })
             task.destinationDirectory.set(project.layout.dir(project.provider { configuredBy.destinationDirectory.get().asFile }))
             task.optionsFrom(configuredBy)
+            // What the task of Gradle depends on, such as the task that generates its configuration script in Grails, which
+            // is given to it as a file once the task graph is ready, without the task that produces it
+            task.dependsOn({ configuredBy.taskDependencies.getDependencies(configuredBy).findAll { Task dependency -> dependency != task } })
             task.sourceCompatibility.set(project.provider { configuredBy.sourceCompatibility })
             task.targetCompatibility.set(project.provider { configuredBy.targetCompatibility })
             task.javaLauncher.set(configuredBy.javaLauncher)
