@@ -182,6 +182,9 @@ plugin. It is not part of `build`, as it takes ten minutes for the default proje
 to `build/benchmark/results.md`, with each run in `results.csv`, the build logs in `logs` and the generated
 projects in `projects`, where they can be built by hand.
 
+The Benchmark workflow runs it on a fresh GitHub-hosted runner, where no other build competes with it: start it
+from the Actions tab, and the results are in the summary of the run and in its artifact.
+
 The generated project is laid out like an application on a persistence framework such as Grails' GORM:
 
 - `transform`, a global AST transformation that reads the associations of persistent classes the way GORM does:

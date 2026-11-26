@@ -1,0 +1,60 @@
+# Copyright the original author or authors.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+name: Benchmark
+
+# Run by hand from the Actions tab. The results are in the summary of the run, and with each run and the build logs
+# in its artifact.
+on:
+  workflow_dispatch:
+    inputs:
+      size:
+        description: The size of the generated project
+        type: choice
+        options: [small, medium, large]
+        default: large
+      runs:
+        description: The measured runs of each change
+        type: number
+        default: 5
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: gradle/actions/setup-gradle@v4
+      - run: ./gradlew benchmark -Pbenchmark.size="$SIZE" -Pbenchmark.runs="$RUNS"
+        env:
+          SIZE: ${{ inputs.size }}
+          RUNS: ${{ inputs.runs }}
+      - name: Summary
+        if: always()
+        run: |
+          if [ -f build/benchmark/results.md ]; then
+            cat build/benchmark/results.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: benchmark-${{ inputs.size }}
+          path: |
+            build/benchmark/results.md
+            build/benchmark/results.csv
+            build/benchmark/logs
+          if-no-files-found: ignore
