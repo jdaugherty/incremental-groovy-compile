@@ -23,24 +23,57 @@ import groovy.transform.CompileStatic
  *     <li>{@code transform}: a global AST transformation that reads the associations of persistent classes the way GORM
  *     does, by loading the classes of the associated entities compiled before</li>
  *     <li>{@code lib}: utilities and a trait, shared by the other modules</li>
- *     <li>{@code core}: entities in groups called areas, associated with entities of their area and with a few shared
- *     ones, the commands that bind them, and the base classes, traits and utilities they use</li>
- *     <li>{@code app}: the services and controllers of the entities</li>
+ *     <li>{@code core}: the base classes, traits and utilities of the entities, and a few entities that entities of
+ *     every area are associated with</li>
+ *     <li>the entities, in groups called areas, each associated with entities of its area and with shared ones, and the
+ *     commands that bind them</li>
+ *     <li>the services and controllers of half of the entities</li>
+ *     <li>{@code app}: the application</li>
  * </ul>
- * The same shape and seed generate the same sources.
+ * With no feature modules, the entities are in {@code core}, and the services and controllers in {@code app}. With
+ * feature modules, the areas are spread over them, each module holding the entities, services and controllers of its
+ * areas, as Grails plugins do, and {@code app} depends on all of them.
+ * <p>
+ * The same shape, seed and number of feature modules generate the same sources.
  */
 @CompileStatic
 class ProjectGenerator {
-    static final List<String> MODULES = ['lib', 'core', 'app']
-
     private static final int SHARED_ENTITIES = 10
 
     private final ProjectShape shape
     private final long seed
+    private final int featureModules
 
-    ProjectGenerator(ProjectShape shape, long seed) {
+    ProjectGenerator(ProjectShape shape, long seed, int featureModules) {
+        if (featureModules < 0 || featureModules > shape.areas) {
+            throw new IllegalArgumentException("The ${shape.name} project has ${shape.areas} areas to spread over feature modules, so it can have 0 to ${shape.areas} of them, not ${featureModules}")
+        }
         this.shape = shape
         this.seed = seed
+        this.featureModules = featureModules
+    }
+
+    /**
+     * The modules that compile Groovy, each after the ones it depends on.
+     */
+    List<String> getModules() {
+        return ['lib', 'core'] + features + ['app']
+    }
+
+    private List<String> getFeatures() {
+        return (0..<featureModules).collect { int feature -> "feature${String.format('%02d', feature + 1)}".toString() }
+    }
+
+    private String domainModule(int area) {
+        return featureModules == 0 ? 'core' : features[featureOf(area)]
+    }
+
+    private String webModule(int area) {
+        return featureModules == 0 ? 'app' : features[featureOf(area)]
+    }
+
+    private int featureOf(int area) {
+        return (int) (((long) area * featureModules).intdiv(shape.areas))
     }
 
     GeneratedProject generate(File dir, Setup setup, File pluginRepository, String pluginVersion) {
@@ -49,15 +82,18 @@ class ProjectGenerator {
         buildFiles(sources, setup, pluginRepository, pluginVersion)
         transformModule(sources)
         libModule(sources)
-        coreModule(sources, entities)
+        coreModule(sources)
+        domainSources(sources, entities)
+        webSources(sources, entities)
         appModule(sources, entities)
 
         EntityModel target = entities.find { it.service }
-        return new GeneratedProject(dir, [
-            appService : "app/src/main/groovy/${path(target.appPackage)}/${target.name}Service.groovy".toString(),
-            coreEntity : "core/src/main/groovy/${path(target.corePackage)}/${target.name}.groovy".toString(),
-            coreUtility: 'core/src/main/groovy/example/core/support/Dates.groovy',
-            libUtility : 'lib/src/main/groovy/example/lib/Text.groovy',
+        return new GeneratedProject(dir, modules, [
+            service     : "${webModule(target.area)}/src/main/groovy/${path(target.webPackage)}/${target.name}Service.groovy".toString(),
+            entity      : "${domainModule(target.area)}/src/main/groovy/${path(target.domainPackage)}/${target.name}.groovy".toString(),
+            sharedEntity: "core/src/main/groovy/example/core/shared/${sharedName(0)}.groovy".toString(),
+            utility     : 'core/src/main/groovy/example/core/support/Dates.groovy',
+            libUtility  : 'lib/src/main/groovy/example/lib/Text.groovy',
         ])
     }
 
@@ -108,7 +144,7 @@ class ProjectGenerator {
         return entities
     }
 
-    private static void buildFiles(Sources sources, Setup setup, File pluginRepository, String pluginVersion) {
+    private void buildFiles(Sources sources, Setup setup, File pluginRepository, String pluginVersion) {
         sources.write('settings.gradle', """\
             pluginManagement {
                 repositories {
@@ -120,11 +156,12 @@ class ProjectGenerator {
             enableFeaturePreview('GROOVY_COMPILATION_AVOIDANCE')
 
             rootProject.name = 'generated'
-            include 'transform', 'lib', 'core', 'app'
+            include ${(['transform'] + modules).collect { "'${it}'" }.join(', ')}
             """.stripIndent())
         sources.write('gradle.properties', '''\
             org.gradle.jvmargs=-Xmx3g
             org.gradle.caching=false
+            org.gradle.parallel=true
             # global AST transformations are found through META-INF/services, which only the jar carries
             systemProp.org.gradle.java.compile-classpath-packaging=true
             '''.stripIndent())
@@ -154,8 +191,9 @@ class ProjectGenerator {
         Map<String, String> dependencies = [
             lib : '',
             core: "api project(':lib')\n    api project(':transform')\n",
-            app : "implementation project(':core')\n",
         ]
+        features.each { String feature -> dependencies[feature] = "api project(':core')\n" }
+        dependencies['app'] = (featureModules == 0 ? ['core'] : features).collect { "implementation project(':${it}')\n" }.join('    ')
         dependencies.each { String module, String projectDependencies ->
             sources.write("${module}/build.gradle", """\
 plugins {
@@ -273,6 +311,16 @@ tasks.withType(GroovyCompile).configureEach {
                 }
             }
             '''.stripIndent())
+        sources.write('lib/src/main/groovy/example/lib/Formatting.groovy', '''\
+            package example.lib
+
+            class Formatting {
+                static String title(String value) {
+                    String revision = 'rev-0'
+                    return Text.title(value) + revision
+                }
+            }
+            '''.stripIndent())
         for (int i = 1; i <= shape.libUtilities; i++) {
             String name = utilityName(i)
             String call = i == 1 ? 'Text.title(value)' : "${utilityName(i - 1)}.apply(Text.title(value))"
@@ -296,7 +344,7 @@ tasks.withType(GroovyCompile).configureEach {
         return "Util${String.format('%02d', i)}"
     }
 
-    private static void coreModule(Sources sources, List<EntityModel> entities) {
+    private static void coreModule(Sources sources) {
         String support = 'core/src/main/groovy/example/core/support'
         sources.write("${support}/Dates.groovy", '''\
             package example.core.support
@@ -392,9 +440,11 @@ tasks.withType(GroovyCompile).configureEach {
                 }
                 """.stripIndent())
         }
+    }
 
+    private void domainSources(Sources sources, List<EntityModel> entities) {
         for (EntityModel model : entities) {
-            String dir = "core/src/main/groovy/${path(model.corePackage)}"
+            String dir = "${domainModule(model.area)}/src/main/groovy/${path(model.domainPackage)}"
             sources.write("${dir}/${model.name}.groovy", entitySource(model))
             if (model.command) {
                 sources.write("${dir}/${model.name}Command.groovy", commandSource(model))
@@ -440,7 +490,7 @@ tasks.withType(GroovyCompile).configureEach {
         summary << '        return text + revision\n'
 
         return """\
-package ${model.corePackage}
+package ${model.domainPackage}
 
 ${imports.collect { "import ${it}" }.join('\n')}
 
@@ -459,7 +509,7 @@ ${summary}    }
 
     private static String commandSource(EntityModel model) {
         return """\
-package ${model.corePackage}
+package ${model.domainPackage}
 ${model.commandUsesDates ? '\nimport example.core.support.Dates\n' : ''}
 class ${model.name}Command {
     Long id
@@ -474,28 +524,39 @@ class ${model.name}Command {
 """
     }
 
-    private static void appModule(Sources sources, List<EntityModel> entities) {
-        sources.write('app/src/main/groovy/example/app/support/Formatting.groovy', '''\
-            package example.app.support
-
-            import example.lib.Text
-
-            class Formatting {
-                static String title(String value) {
-                    String revision = 'rev-0'
-                    return Text.title(value) + revision
-                }
-            }
-            '''.stripIndent())
+    private void webSources(Sources sources, List<EntityModel> entities) {
         for (EntityModel model : entities.findAll { it.service }) {
-            String dir = "app/src/main/groovy/${path(model.appPackage)}"
+            String dir = "${webModule(model.area)}/src/main/groovy/${path(model.webPackage)}"
             sources.write("${dir}/${model.name}Service.groovy", serviceSource(model))
             sources.write("${dir}/${model.name}Controller.groovy", controllerSource(model))
         }
     }
 
+    /**
+     * With feature modules, the routes of each to a few of its controllers. Without, {@code app} holds the services and
+     * controllers.
+     */
+    private void appModule(Sources sources, List<EntityModel> entities) {
+        features.eachWithIndex { String feature, int index ->
+            List<EntityModel> controllers = entities.findAll { it.service && featureOf(it.area) == index }.take(3)
+            String name = "${feature.capitalize()}Routes"
+            sources.write("app/src/main/groovy/example/app/${name}.groovy", """\
+package example.app
+
+${controllers.collect { "import ${it.webPackage}.${it.name}Controller" }.join('\n')}
+
+class ${name} {
+${controllers.collect { "    ${it.name}Controller ${it.fieldName}Controller\n" }.join('')}
+    List<Map> index() {
+        return [${controllers.collect { "${it.fieldName}Controller.index()" }.join(', ')}]
+    }
+}
+""")
+        }
+    }
+
     private static String serviceSource(EntityModel model) {
-        Set<String> imports = new TreeSet<>(["${model.corePackage}.${model.name}".toString()])
+        Set<String> imports = new TreeSet<>(["${model.domainPackage}.${model.name}".toString()])
         StringBuilder report = new StringBuilder("        String revision = 'rev-0'\n        String text = entity.summary() + entity.total()\n")
         if (model.serviceUsesText) {
             imports << 'example.lib.Text'
@@ -513,7 +574,7 @@ class ${model.name}Command {
         }
         report << '        return text + revision\n'
         return """\
-package ${model.appPackage}
+package ${model.webPackage}
 
 ${imports.collect { "import ${it}" }.join('\n')}
 
@@ -532,9 +593,9 @@ ${report}    }
         String service = "${model.fieldName}Service"
         String title = model.controllerUsesFormatting ? "Formatting.title('${model.fieldName}')" : "'${model.fieldName}'"
         return """\
-package ${model.appPackage}
+package ${model.webPackage}
 
-${model.controllerUsesFormatting ? 'import example.app.support.Formatting\n' : ''}import ${model.corePackage}.${model.name}
+${model.controllerUsesFormatting ? 'import example.lib.Formatting\n' : ''}import ${model.domainPackage}.${model.name}
 
 class ${model.name}Controller {
     ${model.name}Service ${service}
@@ -556,7 +617,7 @@ class ${model.name}Controller {
     }
 
     /**
-     * An entity of {@code core}, with its command, and its service and controller in {@code app}.
+     * An entity, with its command, service and controller.
      */
     private static class EntityModel {
         int index
@@ -585,12 +646,12 @@ class ${model.name}Controller {
             return name.uncapitalize()
         }
 
-        String getCorePackage() {
-            return "example.core.${areaName}"
+        String getDomainPackage() {
+            return "example.domain.${areaName}"
         }
 
-        String getAppPackage() {
-            return "example.app.${areaName}"
+        String getWebPackage() {
+            return "example.web.${areaName}"
         }
 
         private String getAreaName() {

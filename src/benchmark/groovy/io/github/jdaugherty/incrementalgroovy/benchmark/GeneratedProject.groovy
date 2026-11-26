@@ -28,12 +28,33 @@ import java.util.stream.Stream
 @CompileStatic
 class GeneratedProject {
     final File dir
+    /** The modules that compile Groovy, each after the ones it depends on */
+    final List<String> modules
     /** The source files the scenarios change, by their role */
     private final Map<String, String> targets
 
-    GeneratedProject(File dir, Map<String, String> targets) {
+    GeneratedProject(File dir, List<String> modules, Map<String, String> targets) {
         this.dir = dir
+        this.modules = modules
         this.targets = targets
+    }
+
+    /**
+     * The group a module is reported in: the feature modules together, every other module on its own.
+     */
+    static String groupOf(String module) {
+        return module.startsWith('feature') ? 'features' : module
+    }
+
+    /**
+     * The modules by their group, in the order of the modules.
+     */
+    static Map<String, List<String>> groups(List<String> modules) {
+        Map<String, List<String>> groups = new LinkedHashMap<>()
+        for (String module : modules) {
+            groups.computeIfAbsent(groupOf(module)) { [] } << module
+        }
+        return groups
     }
 
     File target(String role) {

@@ -23,6 +23,10 @@ on:
         type: choice
         options: [small, medium, large]
         default: large
+      modules:
+        description: The feature modules to spread the entities over, 0 for none
+        type: number
+        default: 0
       runs:
         description: The measured runs of each change
         type: number
@@ -39,9 +43,10 @@ jobs:
           distribution: temurin
           java-version: 21
       - uses: gradle/actions/setup-gradle@v4
-      - run: ./gradlew benchmark -Pbenchmark.size="$SIZE" -Pbenchmark.runs="$RUNS"
+      - run: ./gradlew benchmark -Pbenchmark.size="$SIZE" -Pbenchmark.modules="$MODULES" -Pbenchmark.runs="$RUNS"
         env:
           SIZE: ${{ inputs.size }}
+          MODULES: ${{ inputs.modules }}
           RUNS: ${{ inputs.runs }}
       - name: Summary
         if: always()
@@ -52,7 +57,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: benchmark-${{ inputs.size }}
+          name: benchmark-${{ inputs.size }}-${{ inputs.modules }}-modules
           path: |
             build/benchmark/results.md
             build/benchmark/results.csv

@@ -62,7 +62,7 @@ tasks.register('benchmark', JavaExec) {
     systemProperty 'benchmark.repository', benchmarkRepository.get().asFile.path
     systemProperty 'benchmark.pluginVersion', version.toString()
     systemProperty 'benchmark.gradleInstallation', gradle.gradleHomeDir.path
-    ['size', 'seed', 'warmUpBuilds', 'warmUps', 'runs', 'setups', 'scenarios', 'gradleVersion'].each { String name ->
+    ['size', 'modules', 'seed', 'warmUpBuilds', 'warmUps', 'runs', 'setups', 'scenarios', 'gradleVersion'].each { String name ->
         def value = providers.gradleProperty("benchmark.${name}")
         if (value.present) {
             systemProperty "benchmark.${name}", value.get()

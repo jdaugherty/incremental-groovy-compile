@@ -25,11 +25,12 @@ import groovy.transform.CompileStatic
 class Scenario {
     static final List<Scenario> ALL = [
         new Scenario('no-change', 'Nothing changed', null),
-        new Scenario('app-service-body', 'A method body of a service in `app`', methodBody('appService')),
-        new Scenario('core-entity-body', 'A method body of an entity in `core`', methodBody('coreEntity')),
-        new Scenario('core-utility-body', 'A method body of a utility that many classes of `core` call', methodBody('coreUtility')),
+        new Scenario('service-body', 'A method body of a service', methodBody('service')),
+        new Scenario('entity-body', 'A method body of an entity', methodBody('entity')),
+        new Scenario('utility-body', 'A method body of a utility in `core` that many entities call', methodBody('utility')),
         new Scenario('lib-utility-body', 'A method body of a utility in `lib`', methodBody('libUtility')),
-        new Scenario('core-entity-abi', 'A public method added to an entity in `core`', publicMethod('coreEntity')),
+        new Scenario('entity-abi', 'A public method added to an entity', publicMethod('entity')),
+        new Scenario('shared-entity-abi', 'A public method added to an entity in `core` that most areas use', publicMethod('sharedEntity')),
         // last, as it starts the incremental compilation over
         new Scenario('clean-build', 'Clean build', null, true),
     ]

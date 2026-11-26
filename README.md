@@ -190,9 +190,14 @@ The generated project is laid out like an application on a persistence framework
 - `transform`, a global AST transformation that reads the associations of persistent classes the way GORM does:
   it loads the classes of the associated entities that were compiled before.
 - `lib`, utilities and a trait, used by the other modules.
-- `core`, entities in groups, each associated with entities of its group and with a few shared ones, extending
-  base classes, implementing traits, and calling utilities; and the command objects that bind them.
-- `app`, a service and a controller for half of the entities.
+- `core`, the base classes, traits and utilities of the entities, and a few shared entities.
+- Entities in groups called areas, each associated with entities of its area and with shared ones, and the
+  command objects that bind them; and a service and a controller for half of the entities.
+- `app`, the application.
+
+By default the entities are in `core`, and their services and controllers in `app`. `-Pbenchmark.modules=<n>`
+spreads the areas over `n` feature modules instead, each holding the entities, services and controllers of its
+areas as a Grails plugin would, with `app` depending on all of them. The modules are built in parallel.
 
 It is compiled in three setups:
 
@@ -204,18 +209,20 @@ It is compiled in three setups:
 All three enable the `GROOVY_COMPILATION_AVOIDANCE` feature preview, so that a module whose compile classpath
 changed only in its implementation stays up-to-date.
 
-Each scenario makes a change and builds `:app:compileGroovy`: nothing, a method body of a service in `app`, of an
-entity in `core`, of a utility that many classes of `core` call, of a utility in `lib`, a public method added to an
-entity, and a clean build. A build that fails is run again, as one does when a build fails for no fault of the
-code, and the time of both counts.
+Each scenario makes a change and builds `:app:compileGroovy`: nothing; a method body of a service, of an entity, of
+a utility in `core` that many entities call, and of a utility in `lib`; a public method added to an entity, and to
+a shared entity in `core` that most areas use; and a clean build. A build that fails is run again, as one does
+when a build fails for no fault of the code, and the time of both counts.
 
 Every setup keeps its daemons for the whole benchmark, and the setups take turns at each change, so that
-whatever else the machine does slows them alike. Each setup needs up to 5 GB of memory. The Gradle properties
-that change what is measured:
+whatever else the machine does slows them alike. Each setup needs memory for a Gradle daemon of 3 GB and a
+compiler daemon of up to 2 GB for each module it compiles at the same time. The Gradle properties that change what
+is measured:
 
 | Property                  | Default            | What it is                                                          |
 |---------------------------|--------------------|---------------------------------------------------------------------|
-| `benchmark.size`          | `medium`           | `small`, `medium` or `large`: 833, 2,548 or 7,588 classes           |
+| `benchmark.size`          | `medium`           | `small`, `medium` or `large`: 8, 25 or 75 areas of 40 entities      |
+| `benchmark.modules`       | `0`                | the feature modules to spread the areas over, up to one per area    |
 | `benchmark.seed`          | `1`                | generates a different project of the same size                      |
 | `benchmark.warmUpBuilds`  | `2`                | clean builds of each setup before the changes, to warm up the JIT   |
 | `benchmark.warmUps`       | `1`                | runs of each change that are not measured                           |

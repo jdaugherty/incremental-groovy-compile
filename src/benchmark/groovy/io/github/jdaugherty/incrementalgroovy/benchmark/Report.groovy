@@ -26,27 +26,38 @@ import io.github.jdaugherty.incrementalgroovy.benchmark.Measurement.ModuleResult
 class Report {
     private final Settings settings
     private final Map<String, String> environment
+    private final List<String> modules
+    /** The modules by the group they are reported in */
+    private final Map<String, List<String>> groups
     private final Map<String, Integer> classCounts
     private final List<Measurement> measurements
 
-    Report(Settings settings, Map<String, String> environment, Map<String, Integer> classCounts, List<Measurement> measurements) {
+    Report(Settings settings, Map<String, String> environment, List<String> modules, Map<String, Integer> classCounts, List<Measurement> measurements) {
         this.settings = settings
         this.environment = environment
+        this.modules = modules
+        this.groups = GeneratedProject.groups(modules)
         this.classCounts = classCounts
         this.measurements = measurements
     }
 
     String markdown() {
         StringBuilder md = new StringBuilder()
-        String modules = ProjectGenerator.MODULES.collect { "`${it}` ${count(classCounts[it] ?: 0)}" }.join(', ')
-        md << "The `${settings.shape.name}` project, generated with seed ${settings.seed}, compiles to ${modules} classes. "
+        String classes = groups.collect { String group, List<String> members ->
+            int classCount = (int) members.sum(0) { String module -> classCounts[module] ?: 0 }
+            "`${group}` ${count(classCount)}${members.size() > 1 ? " in ${members.size()} modules" : ''}"
+        }.join(', ')
+        String layout = settings.featureModules > 0 ? " with ${settings.featureModules} feature modules" : ''
+        md << "The `${settings.shape.name}` project${layout}, generated with seed ${settings.seed}, compiles to ${classes} classes. "
         md << "Gradle ${environment['gradle-version']}, Groovy ${environment['groovy-version']}, Java ${environment['java-version']}, "
         md << "${environment['os']} with ${environment['processors']} processors. "
-        md << "Each setup started with ${settings.warmUpBuilds} clean builds to warm up. "
-        if (settings.warmUps > 0) {
-            md << "Each change was made ${settings.warmUps + settings.runs} times, the first ${settings.warmUps} to warm up. "
+        if (settings.warmUpBuilds > 0) {
+            md << "Each setup started with ${plural(settings.warmUpBuilds, 'clean build')} to warm up. "
         }
-        md << "The times are medians of ${settings.runs} runs, from the start of the build that follows the change to the end of "
+        if (settings.warmUps > 0) {
+            md << "Each change was made ${plural(settings.warmUps + settings.runs, 'time')}, the first ${settings.warmUps} to warm up. "
+        }
+        md << "The times are medians of ${plural(settings.runs, 'run')}, from the start of the build that follows the change to the end of "
         md << 'the build that compiles it, a failed build and the build after it included. The classes are the class files written.\n\n'
 
         boolean compare = Setup.GRADLE in settings.setups && Setup.PLUGIN in settings.setups
@@ -63,15 +74,16 @@ class Report {
         }
 
         md << '\nWhat each compile task did, with the time it took and the classes it wrote, and the time the plugin took '
-        md << 'to extract the ABI of the compile classpath when it changed:\n'
+        md << 'to extract the ABI of the compile classpath when it changed'
+        md << (groups.values().any { it.size() > 1 } ? '. The times of a group of modules add up those of its modules, which may have been compiled in parallel:\n' : ':\n')
         for (Scenario scenario : settings.scenarios) {
             md << "\n#### ${scenario.title}\n\n"
-            md << "| | Build | ${ProjectGenerator.MODULES.collect { "`${it}`" }.join(' | ')} |\n"
-            md << "|---|---|${ProjectGenerator.MODULES.collect { '---' }.join('|')}|\n"
+            md << "| | Build | ${groups.keySet().collect { "`${it}`" }.join(' | ')} |\n"
+            md << "|---|---|${groups.keySet().collect { '---' }.join('|')}|\n"
             for (Setup setup : settings.setups) {
                 List<Measurement> runs = measured(setup, scenario)
                 md << "| ${setup.title} | ${seconds(median(runs*.millis))} | "
-                md << ProjectGenerator.MODULES.collect { String module -> moduleCell(runs.collect { it.modules[module] }) }.join(' | ')
+                md << groups.values().collect { List<String> members -> groupCell(runs, members) }.join(' | ')
                 md << ' |\n'
             }
             Set<String> failures = new LinkedHashSet<>()
@@ -88,14 +100,14 @@ class Report {
 
     String csv() {
         List<String> header = ['setup', 'scenario', 'run', 'warm_up', 'millis', 'builds', 'failure']
-        ProjectGenerator.MODULES.each { String module ->
+        modules.each { String module ->
             header.addAll(["${module}_outcome", "${module}_compile_millis", "${module}_classpath_abi_millis", "${module}_classes"].collect { it.toString() })
         }
         List<String> lines = [header.join(',')]
         for (Measurement measurement : measurements) {
             List<Object> values = [measurement.setup.id, measurement.scenario.id, measurement.run + 1, measurement.warmUp, measurement.millis,
                                    measurement.builds, quote(measurement.failures ? measurement.failures.first() : '')]
-            ProjectGenerator.MODULES.each { String module ->
+            modules.each { String module ->
                 ModuleResult result = measurement.modules[module]
                 values.addAll([result.outcome, result.compileMillis, result.classpathAbiMillis, result.recompiledClasses])
             }
@@ -124,16 +136,30 @@ class Report {
         return "fails${failed < runs.size() ? " ${failed} of ${runs.size()} times" : ''}, then ${result}"
     }
 
-    private static String moduleCell(List<ModuleResult> results) {
-        String outcome = results*.outcome.countBy { it }.max { it.value }.key
-        String cell = outcome == 'EXECUTED' ?
-            "${count((int) median(results*.recompiledClasses))} classes, ${seconds(median(results*.compileMillis))}" :
-            outcome.toLowerCase()
-        double classpathAbi = median(results*.classpathAbiMillis)
+    /**
+     * What the compilation of a group of modules did in the runs of a scenario, or of a single module.
+     */
+    private static String groupCell(List<Measurement> runs, List<String> members) {
+        List<List<ModuleResult>> results = runs.collect { Measurement run -> members.collect { run.modules[it] } }
+        List<Integer> compiled = results.collect { List<ModuleResult> run -> run.count { it.outcome == 'EXECUTED' }.intValue() }
+        int compiledModules = (int) median(compiled)
+        String cell
+        if (compiledModules == 0) {
+            List<String> outcomes = results.collectMany { List<ModuleResult> run -> run*.outcome }
+            cell = outcomes.countBy { it }.max { Map.Entry<String, Integer> it -> it.value }.key.toLowerCase()
+        } else {
+            double classes = median(results.collect { List<ModuleResult> run -> run.sum(0) { ModuleResult it -> it.recompiledClasses } as Integer })
+            double millis = median(results.collect { List<ModuleResult> run -> run.sum(0L) { ModuleResult it -> it.compileMillis } as Long })
+            cell = "${count((int) classes)} classes, ${seconds(millis)}"
+            if (members.size() > 1) {
+                cell = "${compiledModules} of ${members.size()} modules, ${cell}"
+            }
+        }
+        double classpathAbi = median(results.collect { List<ModuleResult> run -> run.sum(0L) { ModuleResult it -> it.classpathAbiMillis } as Long })
         if (classpathAbi >= 50) {
             cell += ", classpath ABI ${seconds(classpathAbi)}"
         }
-        return results.any { it.failed } ? "fails, then ${cell}" : cell
+        return results.any { List<ModuleResult> run -> run.any { it.failed } } ? "fails, then ${cell}" : cell
     }
 
     private static String speedUp(double gradle, double plugin) {
@@ -153,6 +179,10 @@ class Report {
         Arrays.sort(sorted)
         int middle = sorted.length.intdiv(2)
         return sorted.length % 2 == 1 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2d
+    }
+
+    private static String plural(int count, String noun) {
+        return "${count} ${noun}${count == 1 ? '' : 's'}"
     }
 
     private static String count(int count) {

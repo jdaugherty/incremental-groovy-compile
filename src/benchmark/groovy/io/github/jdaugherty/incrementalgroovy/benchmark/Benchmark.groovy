@@ -25,13 +25,15 @@ import java.nio.file.attribute.FileTime
  * Generates a project for each setup, makes the changes of the scenarios to it, and measures the builds that compile
  * them. Writes {@code results.md} and {@code results.csv} to the output directory.
  * <p>
- * The daemons of all setups run for the whole benchmark, so it needs the memory of a Gradle daemon and a Groovy compiler
- * daemon for each, up to 5 GB a setup.
+ * The daemons of all setups run for the whole benchmark, so it needs the memory of a Gradle daemon and its Groovy
+ * compiler daemons for each: one compiler daemon for each module compiled at the same time, at most 2 GB each.
  * <p>
  * It is configured by system properties, which the {@code benchmark} task sets from the Gradle properties of the same
  * names:
  * <ul>
  *     <li>{@code benchmark.size}: {@code small}, {@code medium} (the default) or {@code large}</li>
+ *     <li>{@code benchmark.modules}: the feature modules the areas of entities are spread over, 0 by default for
+ *     entities in {@code core} and their services and controllers in {@code app}</li>
  *     <li>{@code benchmark.seed}: generates a different project of the same size, 1 by default</li>
  *     <li>{@code benchmark.warmUpBuilds}: the clean builds of each setup before the scenarios, 2 by default</li>
  *     <li>{@code benchmark.warmUps}: the runs of each scenario that are not measured, 1 by default</li>
@@ -72,7 +74,7 @@ class Benchmark {
         try {
             for (Setup setup : settings.setups) {
                 File dir = new File(projects, setup.id)
-                GeneratedProject project = new ProjectGenerator(settings.shape, settings.seed)
+                GeneratedProject project = new ProjectGenerator(settings.shape, settings.seed, settings.featureModules)
                     .generate(dir, setup, settings.repository, settings.pluginVersion)
                 BuildRunner runner = new BuildRunner(dir, new File(settings.output, 'gradle-user-home'), settings.gradleInstallation, settings.gradleVersion)
                 generated[setup] = project
@@ -86,7 +88,7 @@ class Benchmark {
                 }
                 if (environment.isEmpty()) {
                     environment.putAll(environmentOf(runner, setup))
-                    ProjectGenerator.MODULES.each { String module -> classCounts[module] = project.classFiles(module).size() }
+                    project.modules.each { String module -> classCounts[module] = project.classFiles(module).size() }
                 }
                 // the compiler is far slower until the JIT has compiled it, which takes more than one build
                 for (int build = 1; build <= settings.warmUpBuilds; build++) {
@@ -112,7 +114,7 @@ class Benchmark {
             runners.values().each { BuildRunner runner -> runner.close() }
         }
 
-        Report report = new Report(settings, environment, classCounts, measurements)
+        Report report = new Report(settings, environment, generated.values().first().modules, classCounts, measurements)
         String markdown = report.markdown()
         new File(settings.output, 'results.md').setText(markdown, 'UTF-8')
         new File(settings.output, 'results.csv').setText(report.csv(), 'UTF-8')
@@ -122,7 +124,7 @@ class Benchmark {
     }
 
     private Measurement measure(BuildRunner runner, GeneratedProject project, Setup setup, Scenario scenario, int run, int revision) {
-        Map<String, Map<String, FileTime>> before = ProjectGenerator.MODULES.collectEntries { String module ->
+        Map<String, Map<String, FileTime>> before = project.modules.collectEntries { String module ->
             [(module): project.classFiles(module)]
         }
         scenario.apply(project, revision)
@@ -142,7 +144,7 @@ class Benchmark {
         }
 
         Map<String, ModuleResult> modules = [:]
-        for (String module : ProjectGenerator.MODULES) {
+        for (String module : project.modules) {
             String task = setup.compileTask(module)
             Map<String, FileTime> previous = before[module]
             Map<String, FileTime> classFiles = project.classFiles(module)
@@ -185,11 +187,15 @@ class Benchmark {
 
     private String describe(Measurement measurement) {
         String run = "${measurement.run + 1}/${settings.warmUps + settings.runs}${measurement.warmUp ? ' (warm-up)' : ''}"
-        String modules = ProjectGenerator.MODULES.collect { String module ->
-            ModuleResult result = measurement.modules[module]
-            String compiled = result.outcome == 'EXECUTED' ? "${result.recompiledClasses} classes in ${Report.seconds(result.compileMillis)}" : result.outcome
-            String abi = result.classpathAbiMillis > 0 ? " (classpath ABI ${Report.seconds(result.classpathAbiMillis)})" : ''
-            "${module} ${result.failed ? 'failed, then ' : ''}${compiled}${abi}"
+        String modules = GeneratedProject.groups(measurement.modules.keySet().toList()).collect { String group, List<String> members ->
+            List<ModuleResult> results = members.collect { measurement.modules[it] }
+            List<ModuleResult> compiled = results.findAll { it.outcome == 'EXECUTED' }
+            String text = compiled.empty ? results*.outcome.unique().join('/') :
+                "${members.size() > 1 ? "${compiled.size()} of ${members.size()} modules, " : ''}" +
+                    "${compiled.sum(0) { ModuleResult it -> it.recompiledClasses }} classes in ${Report.seconds((long) compiled.sum(0L) { ModuleResult it -> it.compileMillis })}"
+            long classpathAbiMillis = (long) results.sum(0L) { ModuleResult it -> it.classpathAbiMillis }
+            String abi = classpathAbiMillis > 0 ? " (classpath ABI ${Report.seconds(classpathAbiMillis)})" : ''
+            "${group} ${results.any { it.failed } ? 'failed, then ' : ''}${text}${abi}"
         }.join(', ')
         return "[${measurement.setup.id}] ${measurement.scenario.id} ${run}: ${Report.seconds(measurement.millis)} in ${measurement.builds} build(s); ${modules}"
     }
@@ -204,6 +210,7 @@ class Benchmark {
         File gradleInstallation
         String gradleVersion
         ProjectShape shape
+        int featureModules
         long seed
         int warmUpBuilds
         int warmUps
@@ -219,6 +226,7 @@ class Benchmark {
             settings.gradleInstallation = new File(required('benchmark.gradleInstallation'))
             settings.gradleVersion = System.getProperty('benchmark.gradleVersion')
             settings.shape = ProjectShape.named(System.getProperty('benchmark.size', 'medium'))
+            settings.featureModules = Integer.parseInt(System.getProperty('benchmark.modules', '0'))
             settings.seed = Long.parseLong(System.getProperty('benchmark.seed', '1'))
             settings.warmUpBuilds = Integer.parseInt(System.getProperty('benchmark.warmUpBuilds', '2'))
             settings.warmUps = Integer.parseInt(System.getProperty('benchmark.warmUps', '1'))
