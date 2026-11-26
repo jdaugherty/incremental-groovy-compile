@@ -113,3 +113,4 @@ tasks.named('rat') {
 
 apply from: 'gradle/import-upstream.gradle'
 apply from: 'gradle/publish-central.gradle'
+apply from: 'gradle/benchmark.gradle'

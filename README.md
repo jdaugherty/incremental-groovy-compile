@@ -34,6 +34,34 @@ With the plugin:
   changed but whose ABI did not, leaves the compile task up-to-date, and one whose ABI changed recompiles only
   the classes that use what changed.
 
+## What it saves
+
+The [benchmark](#benchmark) generates a project laid out like a Grails application, makes changes to it, and
+compiles them with Gradle alone and with the plugin. For the `large` project, which compiles to 7,588 classes in
+three modules, these are the classes each change compiles:
+
+| Change                                                       | Gradle | Gradle, incremental | Plugin |
+|--------------------------------------------------------------|-------:|--------------------:|-------:|
+| A method body of a service in `app`                          |  3,001 |                   2 |      2 |
+| A method body of an entity in `core`                         |  4,542 |                  61 |     61 |
+| A method body of a utility that many classes of `core` call  |  4,542 |  fails, then 4,542  |    680 |
+| A method body of a utility in `lib`                          |     45 |                  45 |     45 |
+| A public method added to an entity in `core`                 |  7,543 |                 101 |    101 |
+
+Gradle compiles Groovy non-incrementally by default, so any change to a module compiles all of it. With
+`options.incremental = true` it fails whenever the compiler loads a class whose superclass or dependency is being
+recompiled, here a trait helper:
+
+```
+NoClassDefFoundError: Unable to configure example.core.support.Describable$Trait$Helper due to missing dependency example/core/support/Describer
+```
+
+and the build after a failure compiles the module in full. It also failed the first time a public method was added
+after that, as the AST transformation loaded an entity whose class file was stashed. The plugin compiles the same
+classes that Gradle's incremental compilation selects, without failing.
+
+The time each change takes depends on the machine more than on the plugin; `./gradlew benchmark` measures it.
+
 ## Usage
 
 Releases are published to Maven Central, where Gradle does not look for plugins unless it is told to:
@@ -141,6 +169,57 @@ diff -ru /tmp/old /tmp/new
 
 Apply the differences, raise the supported versions in `IncrementalGroovyPlugin` and in `build.gradle`, and run
 the tests.
+
+### Benchmark
+
+```
+./gradlew benchmark
+```
+
+generates a project, changes it, and measures the builds that compile the change, with Gradle alone and with the
+plugin. It is not part of `build`, as it takes ten minutes for the default project and more than half an hour for
+`large`; `build` only compiles it. The results are written
+to `build/benchmark/results.md`, with each run in `results.csv`, the build logs in `logs` and the generated
+projects in `projects`, where they can be built by hand.
+
+The generated project is laid out like an application on a persistence framework such as Grails' GORM:
+
+- `transform`, a global AST transformation that reads the associations of persistent classes the way GORM does:
+  it loads the classes of the associated entities that were compiled before.
+- `lib`, utilities and a trait, used by the other modules.
+- `core`, entities in groups, each associated with entities of its group and with a few shared ones, extending
+  base classes, implementing traits, and calling utilities; and the command objects that bind them.
+- `app`, a service and a controller for half of the entities.
+
+It is compiled in three setups:
+
+- **Gradle**: Gradle as it compiles Groovy by default, every class of a module whose source or compile classpath
+  changed.
+- **Gradle, incremental**: Gradle with `options.incremental = true`.
+- **Plugin**: the plugin, with `options.incremental = true`.
+
+All three enable the `GROOVY_COMPILATION_AVOIDANCE` feature preview, so that a module whose compile classpath
+changed only in its implementation stays up-to-date.
+
+Each scenario makes a change and builds `:app:compileGroovy`: nothing, a method body of a service in `app`, of an
+entity in `core`, of a utility that many classes of `core` call, of a utility in `lib`, a public method added to an
+entity, and a clean build. A build that fails is run again, as one does when a build fails for no fault of the
+code, and the time of both counts.
+
+Every setup keeps its daemons for the whole benchmark, and the setups take turns at each change, so that
+whatever else the machine does slows them alike. Each setup needs up to 5 GB of memory. The Gradle properties
+that change what is measured:
+
+| Property                  | Default            | What it is                                                          |
+|---------------------------|--------------------|---------------------------------------------------------------------|
+| `benchmark.size`          | `medium`           | `small`, `medium` or `large`: 833, 2,548 or 7,588 classes           |
+| `benchmark.seed`          | `1`                | generates a different project of the same size                      |
+| `benchmark.warmUpBuilds`  | `2`                | clean builds of each setup before the changes, to warm up the JIT   |
+| `benchmark.warmUps`       | `1`                | runs of each change that are not measured                           |
+| `benchmark.runs`          | `5`                | runs of each change that are measured                               |
+| `benchmark.setups`        | all                | `gradle`, `gradle-incremental` and `plugin`, comma-separated        |
+| `benchmark.scenarios`     | all                | the scenarios to run, comma-separated, as `results.csv` names them  |
+| `benchmark.gradleVersion` | the one running it | the Gradle version that builds the generated projects               |
 
 ### Releasing
 
