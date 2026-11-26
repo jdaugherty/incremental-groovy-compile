@@ -123,7 +123,7 @@ sources, `compileIncrementalGroovy` for `main`.
 The `compileGroovy` task of the source set stays, as the place where the compilation is configured, by the
 build and by other plugins, and as what other tasks depend on. It no longer compiles: it is disabled and depends
 on `compileIncrementalGroovy`, which takes its sources, classpaths, options, toolchain and destination directory
-from it.
+from it, and depends on what it depends on.
 
 Two things to know:
 

@@ -47,7 +47,7 @@ final class CompileOptionsCopier {
      */
     void copy(Class<?> type, Object from, Object to) {
         for (Method getter : type.methods) {
-            if (!isOptionGetter(getter)) {
+            if (!isOptionGetter(getter) || isViewOfLazyProperty(type, getter)) {
                 continue
             }
             Object value = getter.invoke(from)
@@ -85,6 +85,22 @@ final class CompileOptionsCopier {
             return false
         }
         return (method.name.startsWith('get') && method.name.length() > 3) || (method.name.startsWith('is') && method.returnType == boolean)
+    }
+
+    /**
+     * Whether the getter is a plain view of a lazy property of the type, as {@code configurationScript} is of
+     * {@code configurationScriptFile}. The lazy property is copied as a provider, so that it has the value it is given
+     * once the build is configured, as Grails gives the configuration script once the task graph is ready. Copying the
+     * view as well would set the property to the value it has now.
+     */
+    private static boolean isViewOfLazyProperty(Class<?> type, Method getter) {
+        if (Provider.isAssignableFrom(getter.returnType)) {
+            return false
+        }
+        return type.methods.any { Method method ->
+            method != getter && method.parameterCount == 0 && method.name.startsWith(getter.name) &&
+                Property.isAssignableFrom(method.returnType)
+        }
     }
 
     private static Method setterFor(Class<?> type, Method getter) {
