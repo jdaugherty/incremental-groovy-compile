@@ -59,17 +59,14 @@ class Measurement {
         final String outcome
         /** The time of the compile task in all the builds */
         final long compileMillis
-        /** The time of the plugin's task that extracts the ABI of the compile classpath in all the builds */
-        final long classpathAbiMillis
         /** The class files that were written */
         final int recompiledClasses
         /** Whether the compile task failed in a build */
         final boolean failed
 
-        ModuleResult(String outcome, long compileMillis, long classpathAbiMillis, int recompiledClasses, boolean failed) {
+        ModuleResult(String outcome, long compileMillis, int recompiledClasses, boolean failed) {
             this.outcome = outcome
             this.compileMillis = compileMillis
-            this.classpathAbiMillis = classpathAbiMillis
             this.recompiledClasses = recompiledClasses
             this.failed = failed
         }

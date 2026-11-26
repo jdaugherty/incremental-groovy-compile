@@ -30,9 +30,9 @@ With the plugin:
   them from source. Nothing more is recompiled for it.
 - A recompiled class with a Java source has all of its dependents recompiled, as the Groovy compiler cannot
   read a class that refers to it until the Java compiler has run.
-- The compile classpath is compared by its ABI, as the plugin extracts it. A dependency whose class files
-  changed but whose ABI did not, leaves the compile task up-to-date, and one whose ABI changed recompiles only
-  the classes that use what changed.
+- The classes of the compile classpath are compared by their ABI, which leaves out the entries a class has for
+  the nested classes of other classes. A dependency whose ABI did not change recompiles nothing, and one whose
+  ABI changed recompiles only the classes that use what changed.
 
 ## What it saves
 
@@ -110,11 +110,8 @@ The configuration cache and the build cache are supported.
 
 ## What the plugin adds
 
-For each source set with Groovy sources, the plugin adds two tasks, here for `main`:
-
-- `compileIncrementalGroovy`, an `IncrementalGroovyCompile` task, compiles the sources.
-- `extractGroovyCompileClasspathAbi` writes down the ABI of the compile classpath. It is the input that tells
-  the compile task whether the classpath changed.
+For each source set with Groovy sources, the plugin adds an `IncrementalGroovyCompile` task that compiles the
+sources, `compileIncrementalGroovy` for `main`.
 
 The `compileGroovy` task of the source set stays, as the place where the compilation is configured, by the
 build and by other plugins, and as what other tasks depend on. It no longer compiles: it is disabled and depends

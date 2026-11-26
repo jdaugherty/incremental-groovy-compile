@@ -48,14 +48,6 @@ enum Setup {
         return plugin ? ":${module}:compileIncrementalGroovy" : ":${module}:compileGroovy"
     }
 
-    /**
-     * The path of the task that extracts the ABI of the compile classpath of a module, or null when Gradle does that
-     * within the compile task.
-     */
-    String classpathAbiTask(String module) {
-        return plugin ? ":${module}:extractGroovyCompileClasspathAbi" : null
-    }
-
     static Setup byId(String id) {
         Setup setup = values().find { it.id == id }
         if (setup == null) {

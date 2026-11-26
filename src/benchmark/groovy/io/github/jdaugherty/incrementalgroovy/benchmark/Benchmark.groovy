@@ -150,11 +150,9 @@ class Benchmark {
             Map<String, FileTime> classFiles = project.classFiles(module)
             int recompiled = classFiles.count { String path, FileTime time -> previous[path] != time }.intValue()
             long compileMillis = (long) builds.sum(0L) { BuildRun build -> build.tasks[task]?.millis ?: 0L }
-            String abiTask = setup.classpathAbiTask(module)
-            long classpathAbiMillis = abiTask == null ? 0L : (long) builds.sum(0L) { BuildRun build -> build.tasks[abiTask]?.millis ?: 0L }
             boolean failed = builds.any { BuildRun build -> build.tasks[task]?.outcome == 'FAILED' }
             String outcome = builds.last().tasks[task]?.outcome ?: 'NOT RUN'
-            modules[module] = new ModuleResult(outcome, compileMillis, classpathAbiMillis, recompiled, failed)
+            modules[module] = new ModuleResult(outcome, compileMillis, recompiled, failed)
         }
         List<String> failures = builds.findAll { !it.succeeded }.collect { it.failure ?: 'unknown' }
         long millis = (long) builds.sum(0L) { BuildRun build -> build.millis }
@@ -193,9 +191,7 @@ class Benchmark {
             String text = compiled.empty ? results*.outcome.unique().join('/') :
                 "${members.size() > 1 ? "${compiled.size()} of ${members.size()} modules, " : ''}" +
                     "${compiled.sum(0) { ModuleResult it -> it.recompiledClasses }} classes in ${Report.seconds((long) compiled.sum(0L) { ModuleResult it -> it.compileMillis })}"
-            long classpathAbiMillis = (long) results.sum(0L) { ModuleResult it -> it.classpathAbiMillis }
-            String abi = classpathAbiMillis > 0 ? " (classpath ABI ${Report.seconds(classpathAbiMillis)})" : ''
-            "${group} ${results.any { it.failed } ? 'failed, then ' : ''}${text}${abi}"
+            "${group} ${results.any { it.failed } ? 'failed, then ' : ''}${text}"
         }.join(', ')
         return "[${measurement.setup.id}] ${measurement.scenario.id} ${run}: ${Report.seconds(measurement.millis)} in ${measurement.builds} build(s); ${modules}"
     }

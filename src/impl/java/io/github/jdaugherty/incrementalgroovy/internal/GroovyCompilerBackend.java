@@ -60,7 +60,6 @@ import org.gradle.workers.internal.ActionExecutionSpecFactory;
 import org.gradle.workers.internal.IsolatedClassloaderWorkerFactory;
 import org.gradle.workers.internal.WorkerDaemonFactory;
 
-import java.io.File;
 import java.net.MalformedURLException;
 import java.net.URL;
 
@@ -75,13 +74,6 @@ public final class GroovyCompilerBackend implements CompilerBackend {
      * Classpath entries are compared by ABI here and by content in Gradle, so their analyses are cached apart.
      */
     private static final String CLASSPATH_ANALYSIS_SALT = "io.github.jdaugherty.incrementalgroovy:abi:1";
-
-    private final ClasspathEntryAbiHasher abiHasher = new ClasspathEntryAbiHasher();
-
-    @Override
-    public String abiOf(File classpathEntry) {
-        return abiHasher.hash(classpathEntry);
-    }
 
     @Override
     public void compile(IncrementalGroovyCompile task, ServiceRegistry services, InputChanges inputChanges) {

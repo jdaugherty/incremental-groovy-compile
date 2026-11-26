@@ -258,7 +258,7 @@ class IncrementalGroovyPluginFunctionalTest extends Specification {
         gradleVersion << GRADLE_VERSIONS
     }
 
-    def "is up-to-date when a classpath class differs only in an entry for the nested class of another class on Gradle #gradleVersion"() {
+    def "recompiles nothing when a classpath class differs only in an entry for the nested class of another class on Gradle #gradleVersion"() {
         given:
         file('settings.gradle') << "enableFeaturePreview('GROOVY_COMPILATION_AVOIDANCE')\n"
         file('api/build.gradle').text = """
@@ -272,7 +272,9 @@ class IncrementalGroovyPluginFunctionalTest extends Specification {
             }
         """
         // Groovy lists the helper class of Named among the inner classes of Thing when it compiles them together, and
-        // leaves it out when Named is already compiled, as it is once the change to Util recompiles Thing alone
+        // leaves it out when Named is already compiled, as it is once the change to Util recompiles Thing alone. Gradle's
+        // ABI of the classpath keeps that entry, so the task runs, and the compiler, whose ABI leaves it out, finds
+        // nothing to recompile
         File util = source('api', "class Util { static String greeting() { 'hello' } }")
         source('api', "trait Named { String describe() { 'named' } }")
         source('api', "class Thing implements Named { String go() { Util.greeting() } }")
@@ -287,9 +289,8 @@ class IncrementalGroovyPluginFunctionalTest extends Specification {
 
         then:
         file('api/build/classes/groovy/main/Thing.class').bytes != thing
-        result.task(':impl:extractGroovyCompileClasspathAbi').outcome.name() == 'SUCCESS'
+        result.output.contains("Task ':impl:compileIncrementalGroovy' is not up-to-date")
         result.task(':impl:compileIncrementalGroovy').outcome.name() == 'UP_TO_DATE'
-        !result.output.contains("Task ':impl:compileIncrementalGroovy' is not up-to-date")
         recompiledClasses().empty
 
         where:

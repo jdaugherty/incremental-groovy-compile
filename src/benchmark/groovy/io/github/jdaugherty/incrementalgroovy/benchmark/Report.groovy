@@ -73,8 +73,7 @@ class Report {
             md << '\n'
         }
 
-        md << '\nWhat each compile task did, with the time it took and the classes it wrote, and the time the plugin took '
-        md << 'to extract the ABI of the compile classpath when it changed'
+        md << '\nWhat each compile task did, with the time it took and the classes it wrote'
         md << (groups.values().any { it.size() > 1 } ? '. The times of a group of modules add up those of its modules, which may have been compiled in parallel:\n' : ':\n')
         for (Scenario scenario : settings.scenarios) {
             md << "\n#### ${scenario.title}\n\n"
@@ -101,7 +100,7 @@ class Report {
     String csv() {
         List<String> header = ['setup', 'scenario', 'run', 'warm_up', 'millis', 'builds', 'failure']
         modules.each { String module ->
-            header.addAll(["${module}_outcome", "${module}_compile_millis", "${module}_classpath_abi_millis", "${module}_classes"].collect { it.toString() })
+            header.addAll(["${module}_outcome", "${module}_compile_millis", "${module}_classes"].collect { it.toString() })
         }
         List<String> lines = [header.join(',')]
         for (Measurement measurement : measurements) {
@@ -109,7 +108,7 @@ class Report {
                                    measurement.builds, quote(measurement.failures ? measurement.failures.first() : '')]
             modules.each { String module ->
                 ModuleResult result = measurement.modules[module]
-                values.addAll([result.outcome, result.compileMillis, result.classpathAbiMillis, result.recompiledClasses])
+                values.addAll([result.outcome, result.compileMillis, result.recompiledClasses])
             }
             lines << values.join(',')
         }
@@ -154,10 +153,6 @@ class Report {
             if (members.size() > 1) {
                 cell = "${compiledModules} of ${members.size()} modules, ${cell}"
             }
-        }
-        double classpathAbi = median(results.collect { List<ModuleResult> run -> run.sum(0L) { ModuleResult it -> it.classpathAbiMillis } as Long })
-        if (classpathAbi >= 50) {
-            cell += ", classpath ABI ${seconds(classpathAbi)}"
         }
         return results.any { List<ModuleResult> run -> run.any { it.failed } } ? "fails, then ${cell}" : cell
     }

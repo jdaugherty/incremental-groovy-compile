@@ -70,22 +70,13 @@ class IncrementalGroovyPlugin implements Plugin<Project> {
 
     private static void compileGroovyOf(Project project, SourceSet sourceSet) {
         TaskProvider<GroovyCompile> gradleTask = project.tasks.named(sourceSet.getCompileTaskName('groovy'), GroovyCompile)
-        String abiTaskName = sourceSet.getTaskName('extract', 'groovyCompileClasspathAbi')
         String compileTaskName = sourceSet.getTaskName('compileIncremental', 'groovy')
-
-        TaskProvider<GroovyCompileClasspathAbi> abiTask = project.tasks.register(abiTaskName, GroovyCompileClasspathAbi) { GroovyCompileClasspathAbi task ->
-            task.description = "Extracts the ABI of the classpath that the ${sourceSet.name} Groovy source is compiled against."
-            task.classpath.from({ gradleTask.get().classpath })
-            task.abiFile.set(project.layout.buildDirectory.file("tmp/${abiTaskName}/classpath.abi"))
-            task.entryHashes.set(project.layout.buildDirectory.file("tmp/${abiTaskName}/entries.properties"))
-        }
 
         TaskProvider<IncrementalGroovyCompile> compileTask = project.tasks.register(compileTaskName, IncrementalGroovyCompile) { IncrementalGroovyCompile task ->
             GroovyCompile configuredBy = gradleTask.get()
             task.description = "Compiles the ${sourceSet.name} Groovy source, as configured by ${configuredBy.name}."
             task.source.from({ configuredBy.source })
             task.classpath.from({ configuredBy.classpath })
-            task.classpathAbi.set(abiTask.flatMap { it.abiFile })
             task.astTransformationClasspath.from(configuredBy.astTransformationClasspath)
             task.groovyClasspath.from({ configuredBy.groovyClasspath })
             task.destinationDirectory.set(project.layout.dir(project.provider { configuredBy.destinationDirectory.get().asFile }))

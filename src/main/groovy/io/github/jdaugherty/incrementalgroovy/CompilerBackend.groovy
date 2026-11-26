@@ -32,10 +32,4 @@ interface CompilerBackend {
      * @param inputChanges what changed since the task last ran
      */
     void compile(IncrementalGroovyCompile task, ServiceRegistry services, InputChanges inputChanges)
-
-    /**
-     * A hash of the ABI of the classes in a jar or class directory: it changes when something that the classes compiled
-     * against them can see changes, and only then.
-     */
-    String abiOf(File classpathEntry)
 }

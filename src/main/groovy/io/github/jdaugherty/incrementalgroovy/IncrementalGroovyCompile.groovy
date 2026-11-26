@@ -26,11 +26,10 @@ import org.gradle.api.provider.Property
 import org.gradle.api.provider.ProviderFactory
 import org.gradle.api.tasks.CacheableTask
 import org.gradle.api.tasks.Classpath
+import org.gradle.api.tasks.CompileClasspath
 import org.gradle.api.tasks.IgnoreEmptyDirectories
 import org.gradle.api.tasks.Input
-import org.gradle.api.tasks.InputFile
 import org.gradle.api.tasks.InputFiles
-import org.gradle.api.tasks.Internal
 import org.gradle.api.tasks.Nested
 import org.gradle.api.tasks.Optional
 import org.gradle.api.tasks.OutputDirectory
@@ -53,9 +52,6 @@ import javax.inject.Inject
  * <p>
  * The plugin adds one of these for each source set with Groovy sources, to do the work of the source set's
  * {@code GroovyCompile} task. It is configured through that task: both have the same options, sources and classpaths.
- * <p>
- * Unlike {@code GroovyCompile}, the task is out-of-date for a change to the compile classpath only when
- * {@link #getClasspathAbi() the ABI of the classpath} changed, as this plugin reads it.
  */
 @CompileStatic
 @CacheableTask
@@ -98,19 +94,14 @@ abstract class IncrementalGroovyCompile extends DefaultTask {
     abstract ConfigurableFileCollection getSource()
 
     /**
-     * The classpath to compile against. The task does not look at it to tell whether it is up-to-date, but at
-     * {@link #getClasspathAbi()}.
+     * The classpath to compile against.
+     * <p>
+     * Gradle compares it by its ABI to tell whether the task is up-to-date. Where Gradle sees a change that the ABI the
+     * compiler compares classes by does not, the task runs and compiles nothing.
      */
-    @Internal
-    abstract ConfigurableFileCollection getClasspath()
-
-    /**
-     * The file that {@link GroovyCompileClasspathAbi} writes for {@link #getClasspath()}.
-     */
-    @InputFile
-    @PathSensitive(PathSensitivity.NONE)
+    @CompileClasspath
     @Incremental
-    abstract RegularFileProperty getClasspathAbi()
+    abstract ConfigurableFileCollection getClasspath()
 
     /**
      * The classpath containing AST transformations and their dependencies.
