@@ -389,6 +389,31 @@ class IncrementalGroovyPluginFunctionalTest extends Specification {
         gradleVersion << GRADLE_VERSIONS
     }
 
+    def "uses a configuration script set on the task of Gradle once the task graph is ready on Gradle #gradleVersion #arguments"() {
+        given:
+        // Grails sets the script that adds its star imports this way, to the GroovyCompile tasks of the task graph
+        file('impl/compiler-config.groovy').text = "withConfig(configuration) { imports { star 'java.util.concurrent' } }"
+        file('impl/build.gradle') << """
+            def script = file('compiler-config.groovy')
+            gradle.taskGraph.whenReady { graph ->
+                graph.allTasks.findAll { it instanceof GroovyCompile && it.project == project }.each { task ->
+                    task.groovyOptions.configurationScript = script
+                }
+            }
+        """
+        source('impl', "class A { ConcurrentHashMap<String, String> names }")
+
+        when:
+        BuildResult result = compile(gradleVersion, arguments as String[])
+
+        then:
+        result.task(':impl:compileIncrementalGroovy').outcome.name() == 'SUCCESS'
+        file('impl/build/classes/groovy/main/A.class').file
+
+        where:
+        [gradleVersion, arguments] << [GRADLE_VERSIONS, [[], ['--configuration-cache']]].combinations()
+    }
+
     def "compiles the test source set against the main one on Gradle #gradleVersion"() {
         given:
         source('impl', "class A { String name() { 'a' } }")
