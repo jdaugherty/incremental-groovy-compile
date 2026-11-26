@@ -37,30 +37,37 @@ With the plugin:
 ## What it saves
 
 The [benchmark](#benchmark) generates a project laid out like a Grails application, makes changes to it, and
-compiles them with Gradle alone and with the plugin. For the `large` project, which compiles to 7,588 classes in
-three modules, these are the classes each change compiles:
+compiles them with Gradle alone and with the plugin. For the `large` project, 7,588 classes in three modules, on
+a GitHub-hosted runner with 4 processors, Java 21, Gradle 9.9.2 and Groovy 4.0.33, these are the median times from
+a change to its compiled classes, and the classes compiled:
 
-| Change                                                       | Gradle | Gradle, incremental | Plugin |
-|--------------------------------------------------------------|-------:|--------------------:|-------:|
-| A method body of a service in `app`                          |  3,001 |                   2 |      2 |
-| A method body of an entity in `core`                         |  4,542 |                  61 |     61 |
-| A method body of a utility that many classes of `core` call  |  4,542 |  fails, then 4,542  |    680 |
-| A method body of a utility in `lib`                          |     45 |                  45 |     45 |
-| A public method added to an entity in `core`                 |  7,543 |                 101 |    101 |
+| Change                                                       |        Gradle |       Gradle, incremental |        Plugin |
+|--------------------------------------------------------------|--------------:|--------------------------:|--------------:|
+| A method body of a service                                   |  6.9 s, 3,000 |                  1.6 s, 2 |      1.6 s, 2 |
+| A method body of an entity                                   | 13.7 s, 4,542 |                 3.1 s, 61 |     3.1 s, 61 |
+| A method body of a utility in `core` that many entities call | 13.7 s, 4,542 | fails, then 17.4 s, 4,542 |    7.1 s, 680 |
+| A method body of a utility in `lib`                          |    1.6 s, 46 |                 1.6 s, 46 |     1.7 s, 46 |
+| A public method added to an entity                           | 18.2 s, 7,542 |                3.6 s, 101 |    4.0 s, 101 |
+| A public method added to an entity that most areas use       | 18.5 s, 7,542 |             17.0 s, 5,762 | 17.2 s, 5,762 |
+| Clean build                                                  | 18.1 s, 7,588 |             18.4 s, 7,588 | 18.6 s, 7,588 |
 
-Gradle compiles Groovy non-incrementally by default, so any change to a module compiles all of it. With
-`options.incremental = true` it fails whenever the compiler loads a class whose superclass or dependency is being
-recompiled, here a trait helper:
+Gradle compiles Groovy non-incrementally by default, so any change to a module compiles all of it, and a change
+to its ABI all of the modules that depend on it. With `options.incremental = true` it compiles as little as the
+plugin does, until the compiler loads a class whose superclass or dependency is being recompiled, here a trait
+helper:
 
 ```
 NoClassDefFoundError: Unable to configure example.core.support.Describable$Trait$Helper due to missing dependency example/core/support/Describer
 ```
 
-and the build after a failure compiles the module in full. It also failed the first time a public method was added
-after that, as the AST transformation loaded an entity whose class file was stashed. The plugin compiles the same
-classes that Gradle's incremental compilation selects, without failing.
+The build after a failure compiles the module in full. It failed the same way the first time a public method was
+added after that, when the AST transformation loaded an entity whose class file was stashed. The plugin compiles
+the classes that Gradle's incremental compilation selects, without failing. A change to a class that most of the
+project depends on recompiles most of it either way.
 
-The time each change takes depends on the machine more than on the plugin; `./gradlew benchmark` measures it.
+Smaller modules leave less to save. With the entities spread over 15 modules of about 500 classes
+(`-Pbenchmark.modules=15`), Gradle compiles a module in 3.5 s, and the plugin is 2.1 times as fast for a method body
+of a service and 1.5 times for one of an entity.
 
 ## Usage
 
@@ -174,9 +181,9 @@ the tests.
 ```
 
 generates a project, changes it, and measures the builds that compile the change, with Gradle alone and with the
-plugin. It is not part of `build`, as it takes ten minutes for the default project and more than half an hour for
-`large`; `build` only compiles it. The results are written
-to `build/benchmark/results.md`, with each run in `results.csv`, the build logs in `logs` and the generated
+plugin. It is not part of `build`, as it takes about ten minutes for the default project and 25 for `large` on a
+GitHub-hosted runner; `build` only compiles it. The results are written to `build/benchmark/results.md`, with
+each run in `results.csv`, the build logs in `logs` and the generated
 projects in `projects`, where they can be built by hand.
 
 The Benchmark workflow runs it on a fresh GitHub-hosted runner, where no other build competes with it: start it
